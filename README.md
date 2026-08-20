@@ -34,6 +34,22 @@ docker build --target runtime -t lattice-estimator-api:dev .
 docker run --rm -p 127.0.0.1:8000:8000 lattice-estimator-api:dev
 ```
 
+## Releases
+
+Pull requests run the unit checks. Ordinary branch pushes do not trigger CI.
+Pushing a semantic-version tag builds and smoke-tests the Sage image before
+publishing it to `ghcr.io/<repository-owner>/lattice-estimator-api`:
+
+```bash
+git tag -a v0.1.0 -m "lattice-estimator-api v0.1.0"
+git push origin v0.1.0
+```
+
+Every tag publishes its exact version and `sha-<commit>`. The highest stable
+semantic version also publishes `latest` from the same image manifest. A
+pre-release tag such as `v0.2.0-rc.1`, or a stable tag older than an existing
+release, never updates `latest`.
+
 ## Configuration
 
 | Variable | Default |
