@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen --all-groups
+      - run: uv run --frozen ruff check src tests
+      - run: uv run --frozen ruff format --check src tests
+      - run: uv run --frozen pytest tests/unit
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test with real Sage
+        run: docker build --target test -t lattice-estimator-api:test .
+      - name: Build runtime image
+        run: docker build --target runtime -t lattice-estimator-api:dev .
+      - name: Smoke test runtime image
+        shell: bash
+        run: |
+          docker run -d --name lattice-estimator-api -p 127.0.0.1:8000:8000 lattice-estimator-api:dev
+          trap 'docker logs lattice-estimator-api; docker rm -f lattice-estimator-api' EXIT
+          for attempt in {1..30}; do
+            curl --fail http://127.0.0.1:8000/healthz && exit 0
+            sleep 1
+          done
+          exit 1

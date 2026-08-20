@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+*.egg-info/
+
+# Local runtime
+.env
+*.sage.py
+
+# Editors and notebooks
+.idea/
+.vscode/

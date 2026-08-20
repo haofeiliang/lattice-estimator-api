@@ -1,0 +1,33 @@
+[project]
+name = "lattice-estimator-api"
+version = "0.1.0"
+description = "Stateless Sage/lattice-estimator HTTP API"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi==0.139.2",
+  "lattice-estimator @ git+https://github.com/malb/lattice-estimator.git@53da5982597709ba0fdf94ea37a84d822310fd84",
+  "pydantic==2.13.4",
+  "uvicorn==0.51.0",
+]
+
+[dependency-groups]
+dev = [
+  "httpx2==2.9.0",
+  "pytest==9.1.1",
+  "ruff==0.16.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+markers = ["integration: requires SageMath and the real lattice-estimator package"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "BLE", "ASYNC", "RUF"]
