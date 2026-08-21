@@ -1,0 +1,46 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-plan",
+  "version": 2,
+  "timeout_seconds": 600,
+  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "experiments": [
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [128, 256],
+        "modulus": ["17", "4093"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [
+          { "kind": "uniform_ternary" },
+          { "kind": "fixed_weight_binary", "hamming_weight": 64 },
+          { "kind": "discrete_gaussian", "standard_deviation": "1.2" }
+        ],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    },
+    {
+      "attack": "bkw",
+      "axes": {
+        "dimension": [128, 256],
+        "modulus": ["17", "4093"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [
+          { "kind": "uniform_ternary" },
+          { "kind": "fixed_weight_binary", "hamming_weight": 64 },
+          { "kind": "discrete_gaussian", "standard_deviation": "1.2" }
+        ],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    }
+  ]
+}

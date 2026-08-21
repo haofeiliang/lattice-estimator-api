@@ -20,17 +20,27 @@ OBSERVATION_FORMAT = "lattice-estimator/slow-attack-calibration-observation"
 
 
 def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
-    if plan.get("format") != PLAN_FORMAT or plan.get("version") != 1:
+    if plan.get("format") != PLAN_FORMAT or plan.get("version") not in {1, 2}:
         raise ValueError("unsupported calibration plan")
     for experiment in plan["experiments"]:
         axes = experiment["axes"]
-        for model, n, q, samples, secret, sigma in itertools.product(
+        if plan["version"] == 1:
+            errors = [
+                {
+                    "kind": "discrete_gaussian",
+                    "standard_deviation": sigma,
+                }
+                for sigma in axes["error_standard_deviation"]
+            ]
+        else:
+            errors = axes["error"]
+        for model, n, q, samples, secret, error in itertools.product(
             plan["models"],
             axes["dimension"],
             axes["modulus"],
             axes["samples"],
             axes["secret"],
-            axes["error_standard_deviation"],
+            errors,
         ):
             yield {
                 "schema_version": 2,
@@ -40,10 +50,7 @@ def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
                     "modulus": q,
                     "samples": samples,
                     "secret": secret,
-                    "error": {
-                        "kind": "discrete_gaussian",
-                        "standard_deviation": sigma,
-                    },
+                    "error": error,
                 },
                 "models": model,
                 "target_attacks": [experiment["attack"]],
@@ -117,9 +124,9 @@ def collect(plan_path: Path, output: Path, base_url: str, workers: int) -> None:
     existing: set[str] = set()
     if output.exists():
         existing = {
-            json.loads(line)["identity"]
+            row["identity"]
             for line in output.read_text(encoding="utf-8").splitlines()
-            if line.strip()
+            if line.strip() and not _collection_failed(row := json.loads(line))
         }
     planned_requests = requests_from_plan(plan)
     pending = [payload for payload in planned_requests if _identity(payload) not in existing]
@@ -192,11 +199,53 @@ def replay_preflight(source: Path, output: Path, base_url: str, workers: int) ->
             print(f"replayed {completed}/{total}", flush=True)
 
 
+def select_plan(plan_path: Path, source: Path, output: Path) -> None:
+    """Materialize the latest observation for every request in a plan."""
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    rows = {row["identity"]: row for row in _latest_rows([source])}
+    selected = []
+    missing = []
+    for payload in requests_from_plan(plan):
+        identity = _identity(payload)
+        if identity in rows:
+            selected.append(rows[identity])
+        else:
+            missing.append(identity)
+    if missing:
+        raise ValueError(f"source is missing {len(missing)} planned observations")
+    output.write_text(
+        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in selected),
+        encoding="utf-8",
+    )
+
+
 def _computed_bits(outcome: dict[str, Any]) -> float | None:
     if outcome.get("kind") != "computed":
         return None
     value = float(outcome["security_bits"])
     return value if math.isfinite(value) else None
+
+
+def _collection_failed(row: dict[str, Any]) -> bool:
+    return any(
+        row.get(key, {}).get("kind") == "collection_failed" for key in ("preflight", "exact")
+    )
+
+
+def _latest_rows(inputs: list[Path]) -> Iterable[dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    anonymous = 0
+    for path in inputs:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            identity = row.get("identity")
+            if not isinstance(identity, str):
+                identity = f"anonymous:{anonymous}"
+                anonymous += 1
+            latest[identity] = row
+    return latest.values()
 
 
 def _duration_summary(values: list[int]) -> dict[str, int] | None:
@@ -220,26 +269,22 @@ def summarize(inputs: list[Path], output: Path, cushion: float) -> None:
     preflight_durations: dict[str, list[int]] = defaultdict(list)
     exact_durations: dict[str, list[int]] = defaultdict(list)
     worst: dict[str, tuple[float, dict[str, Any] | None]] = {}
-    for path in inputs:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            attack = row["request"]["target_attacks"][0]
-            quick = _computed_bits(row["preflight"])
-            exact = _computed_bits(row["exact"])
-            counts[attack] += 1
-            preflight_outcomes[attack][row["preflight"]["kind"]] += 1
-            exact_outcomes[attack][row["exact"]["kind"]] += 1
-            if isinstance(row.get("preflight_duration_ms"), int):
-                preflight_durations[attack].append(row["preflight_duration_ms"])
-            if isinstance(row.get("exact_duration_ms"), int):
-                exact_durations[attack].append(row["exact_duration_ms"])
-            if quick is not None and exact is not None:
-                delta = quick - exact
-                deltas[attack].append(delta)
-                if attack not in worst or delta > worst[attack][0]:
-                    worst[attack] = (delta, row["request"].get("problem"))
+    for row in _latest_rows(inputs):
+        attack = row["request"]["target_attacks"][0]
+        quick = _computed_bits(row["preflight"])
+        exact = _computed_bits(row["exact"])
+        counts[attack] += 1
+        preflight_outcomes[attack][row["preflight"]["kind"]] += 1
+        exact_outcomes[attack][row["exact"]["kind"]] += 1
+        if isinstance(row.get("preflight_duration_ms"), int):
+            preflight_durations[attack].append(row["preflight_duration_ms"])
+        if isinstance(row.get("exact_duration_ms"), int):
+            exact_durations[attack].append(row["exact_duration_ms"])
+        if quick is not None and exact is not None:
+            delta = quick - exact
+            deltas[attack].append(delta)
+            if attack not in worst or delta > worst[attack][0]:
+                worst[attack] = (delta, row["request"].get("problem"))
     attacks = {}
     for attack in sorted(counts):
         values = deltas[attack]
@@ -285,6 +330,10 @@ def main() -> None:
     replay_parser.add_argument("--output", type=Path, required=True)
     replay_parser.add_argument("--estimator-url", default="http://127.0.0.1:8000")
     replay_parser.add_argument("--workers", type=int, default=3)
+    select_parser = commands.add_parser("select-plan")
+    select_parser.add_argument("--plan", type=Path, required=True)
+    select_parser.add_argument("--input", type=Path, required=True)
+    select_parser.add_argument("--output", type=Path, required=True)
     summary_parser = commands.add_parser("summarize")
     summary_parser.add_argument("--input", type=Path, action="append", required=True)
     summary_parser.add_argument("--output", type=Path, required=True)
@@ -302,6 +351,8 @@ def main() -> None:
             arguments.estimator_url,
             arguments.workers,
         )
+    elif arguments.command == "select-plan":
+        select_plan(arguments.plan, arguments.input, arguments.output)
     else:
         summarize(arguments.input, arguments.output, arguments.safety_cushion_bits)
 

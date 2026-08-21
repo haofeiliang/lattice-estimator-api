@@ -1,0 +1,18 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-plan",
+  "version": 1,
+  "timeout_seconds": 600,
+  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "experiments": [
+    {
+      "attack": "bkw",
+      "axes": {
+        "dimension": [2048, 4096],
+        "modulus": ["4096", "4294967296"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [{ "kind": "uniform_binary" }],
+        "error_standard_deviation": ["0.7", "3.2"]
+      }
+    }
+  ]
+}

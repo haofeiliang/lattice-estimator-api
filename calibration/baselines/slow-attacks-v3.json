@@ -1,0 +1,129 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-baseline",
+  "version": 3,
+  "generated_at": "2026-08-21T21:15:33+08:00",
+  "provenance": {
+    "estimator_commit": "53da5982597709ba0fdf94ea37a84d822310fd84",
+    "sage_version": "10.9",
+    "adapter_version": "3",
+    "preflight_rule_version": 3,
+    "platform": "linux/amd64"
+  },
+  "method": {
+    "kind": "structural_attack_models",
+    "fitted_coefficients": false,
+    "description": "Arora-GB reproduces the Gaussian-tail, semi-regular solving-degree, and secret-guessing composition. BKW reproduces the pinned coded-BKW b/t2 search, coded dimensions, quantization variance, success amplification, sample requirement, and C0 through C4 costs in log space. Calibration measures error and selects uniform margins; it does not fit either model."
+  },
+  "datasets": [
+    {
+      "purpose": "broad Arora-GB and BKW grid, n through 1024, q through 4096, sigma 0.3 through 4.0",
+      "plan": "calibration/plans/slow-attacks-v1.json",
+      "plan_sha256": "0e65b3b442e6c7eed21ef3aaba1a320d41a0d752bf619bc7aabed820a334b84a",
+      "exact_observations": 624,
+      "exact_observations_sha256": "7e11a500fa5f1de8f23eb22154eea7383953e17ff9b2a9ff1fe894579497fbcb",
+      "bkw_preflight_replay_sha256": "bca670318c9431999c408e8fa21a6d156f28956fa35bd3f37c58477f47bcaaf2"
+    },
+    {
+      "purpose": "Arora-GB n=1024 long-timeout holdout",
+      "plan": "calibration/plans/arora-n1024-holdout-v1.json",
+      "plan_sha256": "4b1b85b9f55b9b4cdbb0e589cd651ce7eaf45d4ea0d3a636e4a627eaab2358c9",
+      "exact_observations": 6,
+      "exact_observations_sha256": "bb00345f6420d7c682e6d28a863553bafad732adb1f25d8eda006f1f1e991f74",
+      "preflight_replay_sha256": "ccdc6f883aab41119503417d91866defc3e67c80f0ed27b06c92adc9f217ef70"
+    },
+    {
+      "purpose": "Arora-GB independent q=4093 validation grid",
+      "plan": "calibration/plans/arora-v2-validation-v1.json",
+      "plan_sha256": "fba4258445a08c9e9bc56a969bedc60c384d49c761b0454f6bc739c7f71e8dd0",
+      "exact_observations": 30,
+      "exact_observations_sha256": "5cfc188c23941a6f89f9304f622223644832160dc077a0730ee0b6aa7de1d21f",
+      "preflight_replay_sha256": "a312bfe929311ac923aa6af8f6af616acc8f0aff7522b44e1b52a4730c4c6437"
+    },
+    {
+      "purpose": "Arora-GB finite samples and secret-diversity smoke grids",
+      "plans": [
+        "calibration/plans/arora-v2-diversity-smoke-v1.json",
+        "calibration/plans/arora-v2-finite-samples-smoke-v1.json"
+      ],
+      "plan_sha256": [
+        "9ee09c755d48577d8f002e295c2eefe43cbbfa8e20716e5284951ffe039cfc0f",
+        "8d80d567e7ee46517a2ab6e92a1ac023f696cf453e187399ef9a0175a2f54001"
+      ],
+      "exact_observations": 36,
+      "exact_observations_sha256": [
+        "c32d208eadda191156e5020dbf70c0e4a8ab1a297b1ac3b0ec9a07bfe1d434ef",
+        "fb6f26f8e9c32b3c03553cd4bcb95c98ffd342275817b5845964d141259058f2"
+      ],
+      "preflight_replay_sha256": [
+        "2ea50abfdfaa1d7ba0cc962f19d823ce945b443c592347311790cb950ba8c85b",
+        "b3c2e435e08a730846819aeb2f6d138aedfd7a5f32456e38bd3ee22d91890882"
+      ]
+    },
+    {
+      "purpose": "exact BKW runtime for n through 1024",
+      "plan": "calibration/plans/bkw-runtime-validation-v1.json",
+      "plan_sha256": "f5415b636e09699543f0d0abcc64c9b3124a7f326decc96e3dd19885c1ef174f",
+      "exact_observations": 18,
+      "exact_observations_sha256": "0893621666357b96f4e16a32d21001335530396dcbfa7448a1b60e075d90d316",
+      "preflight_replay_sha256": "aa7bf9bc1aeee204a401631bc7149448aceabe193b201cf02e7f92d49cda86bf"
+    },
+    {
+      "purpose": "BKW finite samples and uniform-ternary, fixed-weight-binary, and Gaussian secrets on independent moduli",
+      "plan": "calibration/plans/bkw-structural-diversity-v1.json",
+      "plan_sha256": "418bce10f9bdd839b1e209d924c5387a5ba446fc081abcef0077c010a98875fd",
+      "exact_observations": 162,
+      "exact_observations_sha256": "933a36e5bf88ca2a251a61311d5e29f5e45737827a2de51b7f66319162df0b59",
+      "preflight_replay_sha256": "1f029ca7c747586e3b32f5809691e9253b80f46d6f44b67be39e84f2da27b85b"
+    },
+    {
+      "purpose": "BKW n=2048 and n=4096 runtime and error holdout",
+      "plan": "calibration/plans/bkw-large-runtime-v1.json",
+      "plan_sha256": "f18ebf78a3d6bc8802e793adf1c7b87059f8783cfc11691e357f5de8870ebf04",
+      "exact_observations": 8,
+      "exact_observations_sha256": "0b9dfa238eef103be7f121ace850f39857cee2f86b54a719796b742bf6241386"
+    }
+  ],
+  "safety_cushion_bits": 8,
+  "attacks": {
+    "arora_gb": {
+      "observations": 456,
+      "comparable": 168,
+      "maximum_unsafe_error_bits": 1.9895196601282805e-12,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_structural_preflight_with_margin",
+      "supported_preflight_domain": {
+        "error": "discrete_gaussian",
+        "samples": "finite_or_unlimited",
+        "secret": "all_currently_supported_secret_distributions"
+      },
+      "unknown_rule": "A preflight_unknown result always runs exact Arora-GB."
+    },
+    "bkw": {
+      "observations": 410,
+      "comparable": 357,
+      "maximum_unsafe_error_bits": 0.39403020087212326,
+      "worst_parameter": {
+        "n": 256,
+        "q": "8",
+        "sigma": "1",
+        "samples": "unlimited",
+        "secret": "uniform_binary"
+      },
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_structural_preflight_with_margin",
+      "supported_preflight_domain": {
+        "error": "discrete_gaussian",
+        "samples": "finite_or_unlimited",
+        "secret": "all_currently_supported_secret_distributions"
+      },
+      "runtime": {
+        "exact_n_through_1024_seconds": "2.279_to_3.782",
+        "exact_n_2048_4096_seconds": "3.118_to_7.863",
+        "preflight_n_2048_4096_seconds": "1.612_to_1.688"
+      },
+      "unknown_rule": "A preflight_unknown result always runs exact BKW."
+    }
+  }
+}

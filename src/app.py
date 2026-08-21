@@ -263,8 +263,8 @@ def _metadata() -> MetadataResponse:
                 attacks=list(LWE_ATTACKS),
                 distributions=list(EXACT_DISTRIBUTIONS),
                 notes=[
-                    "arora_gb preflight is calibrated for production selection; "
-                    "bkw preflight is research-only"
+                    "rule-v4 arora_gb and structural coded-bkw preflight are calibrated "
+                    "for production selection in their reviewed Gaussian and bounded domains"
                 ],
             ),
             "ntru": SupportMatrixEntry(

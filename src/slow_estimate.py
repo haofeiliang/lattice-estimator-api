@@ -8,10 +8,10 @@ required before their output is used with a stop margin.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-SLOW_ESTIMATE_RULE_VERSION = 2
+SLOW_ESTIMATE_RULE_VERSION = 4
 ARORA_MAX_SOLVING_DEGREE = 256
 ARORA_GAUSSIAN_MAX_TAIL_SEARCH = 64
 ARORA_GAUSSIAN_REAL_PRECISION_BITS = 256
@@ -31,6 +31,19 @@ class _AroraCoreEstimate:
     degree: int
     tail: int
     samples: int
+
+
+@dataclass(frozen=True)
+class _BkwEstimate:
+    log2_cost: float
+    log2_samples: float
+    b: int
+    t1: int
+    t2: int
+    ncod: int
+    ntop: int
+    ntest: int
+    sample_additions: int = 0
 
 
 def _finite_float(value: Any) -> float | None:
@@ -417,7 +430,7 @@ def _arora_sparse_guessing(params: Any, omega: float) -> tuple[_AroraCoreEstimat
 
 
 def arora_gb_estimate(params: Any, omega: float = 2.0) -> SlowEstimate:
-    """Return the v2 Arora-GB estimate and its selected algebraic parameters."""
+    """Return the reviewed Arora-GB estimate and its selected algebraic parameters."""
     normalized = params.normalize()
     if bool(getattr(normalized.Xe, "is_bounded", False)):
         cost = _arora_bounded(normalized, omega)
@@ -450,23 +463,336 @@ def arora_gb_estimate(params: Any, omega: float = 2.0) -> SlowEstimate:
     )
 
 
-def bkw_log2_cost(params: Any) -> float:
-    """Return the restored optimistic coded-BKW table-cost estimate."""
-    normalized = params.normalize()
-    sigma = _finite_float(getattr(normalized.Xe, "stddev", None))
-    if sigma is None or sigma <= 0:
+def _log2_add(*values: float) -> float:
+    finite = [value for value in values if value != -math.inf]
+    if not finite:
+        return -math.inf
+    maximum = max(finite)
+    if maximum == math.inf:
         return math.inf
-    logq = math.log2(int(normalized.q))
-    available_log2_samples = _log2_int_like(normalized.m)
-    best = math.inf
-    for block_size in range(1, min(int(normalized.n), 64) + 1):
-        blocks = math.ceil(int(normalized.n) / block_size)
-        table_log2 = block_size * logq
-        required_log2_samples = math.log2(max(1, blocks)) + table_log2 + 8
-        if not _is_infinite(normalized.m) and available_log2_samples < required_log2_samples:
-            continue
-        effective_sigma_log2 = math.log2(sigma) + 0.5 * blocks
-        if effective_sigma_log2 - logq > math.log2(0.25):
-            continue
-        best = min(best, math.log2(max(1, blocks)) + table_log2)
+    return maximum + math.log2(sum(2 ** (value - maximum) for value in finite))
+
+
+def _log2_positive_difference(log2_left: float, right: int) -> float:
+    if right <= 0:
+        return log2_left
+    log2_right = math.log2(right)
+    if log2_left <= log2_right:
+        return -math.inf
+    delta = log2_right - log2_left
+    if delta < -54:
+        return log2_left
+    return log2_left + math.log2(1 - 2**delta)
+
+
+def _bkw_q_minus_one_log2(b: int, log2_q: float) -> float:
+    exponent = b * log2_q
+    if exponent > 54:
+        return exponent
+    return exponent + math.log2(1 - 2 ** (-exponent))
+
+
+def _bkw_n(i: int, ell: int, ntest: int, b: int, log2_q: float) -> int:
+    if ntest <= 0:
+        return 0
+    denominator = ell / ntest + i / (2 * log2_q)
+    return math.floor(b / denominator) if denominator > 0 else 0
+
+
+def _bkw_ntest(n: int, ell: int, t1: int, t2: int, b: int, log2_q: float) -> int:
+    if t1 * b >= n:
+        return 0
+    upper = n - t1 * b
+
+    def residual(ntest: int) -> int:
+        ncod = sum(_bkw_n(i, ell, ntest, b, log2_q) for i in range(1, t2 + 1))
+        return n - ncod - ntest - t1 * b
+
+    low, high = 1, upper
+    while low < high:
+        middle = (low + high) // 2
+        if residual(middle) > 0:
+            low = middle + 1
+        else:
+            high = middle
+    candidates = range(max(1, low - 4), min(upper, low + 4) + 1)
+    return min(candidates, key=lambda value: (abs(residual(value)), value))
+
+
+def _bkw_t1(n: int, ell: int, total_t2: int, b: int, log2_q: float) -> int:
+    ntest = _bkw_ntest(n, ell, 0, total_t2, b, log2_q)
+    result = sum(_bkw_n(i, ell, ntest, b, log2_q) <= b for i in range(1, total_t2 + 1))
+    return min(result, n // b)
+
+
+def _bkw_amplification_log2(log2_variance: float, log2_q: float) -> float:
+    log2_sigma_over_q = 0.5 * log2_variance + 0.5 * math.log2(2 * math.pi) - log2_q
+    if log2_sigma_over_q > 4:
+        return math.inf
+    log_advantage = -math.pi * 2 ** (2 * log2_sigma_over_q)
+    if log_advantage >= math.log(0.99):
+        return 0.0
+    twice_log_advantage = 2 * log_advantage
+    numerator = -2 * math.log(0.02)
+    if twice_log_advantage < -36:
+        return (math.log(numerator) - twice_log_advantage) / math.log(2)
+    denominator = -math.log1p(-math.exp(twice_log_advantage))
+    if denominator <= 0:
+        return math.inf
+    return math.log2(math.ceil(numerator / denominator))
+
+
+def _bkw_local_minimum(
+    start: int,
+    stop: int,
+    evaluate: Any,
+    better: Any,
+) -> _BkwEstimate | None:
+    """Mirror estimator.util.local_minimum for integer parameters."""
+    if stop <= start:
+        return None
+    low = start
+    high = stop - 1
+    initial_low, initial_high = low, high
+    direction = -1
+    next_value: int | None = high
+    last_value: int | None = None
+    seen: set[int] = set()
+    best: _BkwEstimate | None = None
+    while (
+        next_value is not None
+        and next_value not in seen
+        and initial_low <= next_value <= initial_high
+    ):
+        last_value = next_value
+        next_value = None
+        current = evaluate(last_value)
+        seen.add(last_value)
+        if best is None and current is not None:
+            best = current
+        if current is not None and best is not None and better(current, best):
+            best = current
+            if abs(direction) != 1:
+                direction = -1
+                next_value = last_value - 1
+            elif direction == -1:
+                direction = -2
+                high = last_value
+                next_value = math.ceil((low + high) / 2)
+            else:
+                direction = 2
+                low = last_value
+                next_value = math.floor((low + high) / 2)
+        elif direction == -1:
+            direction = 1
+            next_value = last_value + 2
+        elif direction == 1:
+            next_value = None
+        elif direction == -2:
+            low = last_value
+            next_value = math.ceil((low + high) / 2)
+        else:
+            high = last_value
+            next_value = math.floor((low + high) / 2)
+        if next_value == last_value:
+            next_value = None
     return best
+
+
+def _bkw_cost(
+    *,
+    n: int,
+    q: int,
+    secret_stddev: float,
+    error_stddev: float,
+    secret_width: float,
+    secret_larger_than_error: bool,
+    total_t2: int,
+    b: int,
+) -> _BkwEstimate | None:
+    log2_q = math.log2(q)
+    ell = b - 1
+    t1 = _bkw_t1(n, ell, total_t2, b, log2_q)
+    t2 = total_t2 - t1
+    ntest = _bkw_ntest(n, ell, t1, t2, b, log2_q)
+    if ntest:
+        log2_sigma_set = (1 - ell / ntest) * log2_q - 0.5 * math.log2(12)
+        ni = [_bkw_n(i, ell, ntest, b, log2_q) for i in range(1, t2 + 1)]
+    else:
+        log2_sigma_set = -math.inf
+        ni = [0] * t2
+    ncod = sum(ni)
+    ntot = ncod + ntest
+    ntop = max(n - ncod - ntest - t1 * b, 0)
+    invalid = _BkwEstimate(math.inf, math.inf, b, t1, t2, ncod, ntop, ntest)
+    steps = t1 + t2
+    error_variance_log2 = steps + 2 * math.log2(error_stddev)
+    coding_variance_log2 = (
+        2 * math.log2(secret_stddev) + 2 * log2_sigma_set + math.log2(ntot)
+        if ntot > 0 and secret_stddev > 0
+        else -math.inf
+    )
+    final_variance_log2 = _log2_add(error_variance_log2, coding_variance_log2)
+    log2_m_amplification = _bkw_amplification_log2(final_variance_log2, log2_q)
+    if not math.isfinite(log2_m_amplification):
+        return invalid
+
+    log2_qb_minus_one = _bkw_q_minus_one_log2(b, log2_q)
+
+    def log2_m_plus_tables(table_count: int) -> float:
+        table_term = (
+            math.log2(table_count) + log2_qb_minus_one - 1 if table_count > 0 else -math.inf
+        )
+        return _log2_add(log2_m_amplification, table_term)
+
+    log2_samples = log2_m_plus_tables(steps)
+    costs: list[float] = []
+    if secret_larger_than_error:
+        remaining = n - t1 * b
+        log2_m_minus_n = _log2_positive_difference(log2_samples, remaining)
+        if log2_m_minus_n == -math.inf:
+            return invalid
+        costs.append(log2_m_minus_n + math.log2(n + 1) + math.log2(math.ceil(remaining / (b - 1))))
+
+    c1_terms = []
+    for i in range(1, t1 + 1):
+        c1_terms.append(math.log2(n + 1 - i * b) + log2_m_plus_tables(steps - i))
+    costs.append(_log2_add(*c1_terms))
+
+    c2_terms: list[float] = []
+    prefix_n = 0
+    for i, n_i in enumerate(ni, start=1):
+        if n_i > 0:
+            c2_terms.append(2 + log2_m_plus_tables(i) + math.log2(n_i))
+        prefix_n += n_i
+        dimension_factor = ntop + ntest + prefix_n
+        if dimension_factor > 0:
+            c2_terms.append(math.log2(dimension_factor) + log2_m_plus_tables(i - 1))
+    costs.append(_log2_add(*c2_terms))
+
+    guessing_base = 2 * secret_width + 1
+    if ntop > 0:
+        costs.append(log2_m_amplification + math.log2(ntop) + ntop * math.log2(guessing_base))
+    c4_test = 2 + log2_m_amplification + math.log2(ntest) if ntest > 0 else -math.inf
+    c4_fft = ntop * math.log2(guessing_base) + b * log2_q + math.log2(b * log2_q + 1)
+    costs.append(_log2_add(c4_test, c4_fft))
+    log2_cost = _log2_add(*costs)
+    success = math.erf(secret_width / math.sqrt(2 * error_stddev))
+    if success <= 0:
+        return invalid
+    if ntop:
+        log2_cost -= ntop * math.log2(success)
+    return _BkwEstimate(log2_cost, log2_samples, b, t1, t2, ncod, ntop, ntest)
+
+
+def bkw_estimate(params: Any) -> SlowEstimate:
+    """Approximate pinned coded-BKW equations using ordinary Python and log space."""
+    normalized = params.normalize()
+    n = int(normalized.n)
+    q = int(normalized.q)
+    secret_stddev = _finite_float(getattr(normalized.Xs, "stddev", None))
+    original_error_stddev = _finite_float(getattr(normalized.Xe, "stddev", None))
+    bounds = getattr(normalized.Xs, "bounds", None)
+    if (
+        n <= 0
+        or q <= 1
+        or secret_stddev is None
+        or secret_stddev <= 0
+        or original_error_stddev is None
+        or original_error_stddev <= 0
+        or bounds is None
+    ):
+        return SlowEstimate(math.inf, {"model": "coded_bkw_structural"})
+    try:
+        lower, upper = (float(value) for value in bounds)
+    except (TypeError, ValueError, OverflowError):
+        return SlowEstimate(math.inf, {"model": "coded_bkw_structural"})
+    if (
+        bool(getattr(normalized.Xs, "is_Gaussian_like", False))
+        and float(getattr(normalized.Xs, "mean", 0)) == 0
+    ):
+        lower = max(lower, -3 * secret_stddev)
+        upper = min(upper, 3 * secret_stddev)
+    secret_width = upper - lower + 1
+    if not math.isfinite(secret_width) or secret_width <= 0:
+        return SlowEstimate(math.inf, {"model": "coded_bkw_structural"})
+
+    def search(error_stddev: float, available_log2_samples: float) -> _BkwEstimate | None:
+        secret_larger = secret_stddev > error_stddev
+
+        def better(current: _BkwEstimate, incumbent: _BkwEstimate) -> bool:
+            sample_regression = (
+                incumbent.log2_samples <= available_log2_samples < current.log2_samples
+            )
+            return current.log2_cost <= incumbent.log2_cost and not sample_regression
+
+        def evaluate_b(b: int) -> _BkwEstimate | None:
+            return _bkw_local_minimum(
+                2,
+                max(3, n // b),
+                lambda total_t2: _bkw_cost(
+                    n=n,
+                    q=q,
+                    secret_stddev=secret_stddev,
+                    error_stddev=error_stddev,
+                    secret_width=secret_width,
+                    secret_larger_than_error=secret_larger,
+                    total_t2=total_t2,
+                    b=b,
+                ),
+                better,
+            )
+
+        return _bkw_local_minimum(
+            2,
+            3 * math.ceil(math.log2(q)),
+            evaluate_b,
+            better,
+        )
+
+    if _is_infinite(normalized.m):
+        best = search(original_error_stddev, math.inf)
+    else:
+        sample_count = int(normalized.m)
+        candidates: list[_BkwEstimate] = []
+        original = search(original_error_stddev, math.log2(sample_count))
+        if original is not None and original.log2_samples <= math.log2(sample_count):
+            candidates.append(original)
+        stale = 0
+        for additions in range(1, min(sample_count, 64) + 1):
+            capacity = _log2_binomial(sample_count, additions) + additions
+            current = search(original_error_stddev * math.sqrt(additions), capacity)
+            if current is not None and current.log2_samples <= capacity:
+                current = replace(current, sample_additions=additions)
+                if not candidates or current.log2_cost < min(
+                    candidate.log2_cost for candidate in candidates
+                ):
+                    stale = 0
+                else:
+                    stale += 1
+                candidates.append(current)
+            elif candidates:
+                stale += 1
+            if stale >= 8:
+                break
+        best = min(candidates, key=lambda candidate: candidate.log2_cost) if candidates else None
+    if best is None or not math.isfinite(best.log2_cost):
+        return SlowEstimate(math.inf, {"model": "coded_bkw_structural"})
+
+    error_stddev = original_error_stddev * math.sqrt(max(1, best.sample_additions))
+
+    return SlowEstimate(
+        best.log2_cost,
+        {
+            "model": "coded_bkw_structural",
+            "b": best.b,
+            "t1": best.t1,
+            "t2": best.t2,
+            "coded_coordinates": best.ncod,
+            "guessed_coordinates": best.ntop,
+            "tested_coordinates": best.ntest,
+            "log2_samples": best.log2_samples,
+            "effective_error_stddev": error_stddev,
+            "sample_additions": best.sample_additions,
+        },
+    )

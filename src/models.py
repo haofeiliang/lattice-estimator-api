@@ -337,6 +337,15 @@ class NoFiniteEstimateOutcome(StrictModel):
     raw_result: JsonValue | None = None
 
 
+class PreflightUnknownOutcome(StrictModel):
+    """A bounded preflight search could not make a scheduling decision."""
+
+    kind: Literal["preflight_unknown"]
+    code: str
+    reason: str
+    raw_result: JsonValue | None = None
+
+
 class FailedOutcome(StrictModel):
     kind: Literal["failed"]
     code: str
@@ -346,7 +355,11 @@ class FailedOutcome(StrictModel):
 
 
 WorkerOutcome: TypeAlias = Annotated[
-    ComputedOutcome | NoFiniteEstimateOutcome | UnsupportedOutcome | FailedOutcome,
+    ComputedOutcome
+    | NoFiniteEstimateOutcome
+    | PreflightUnknownOutcome
+    | UnsupportedOutcome
+    | FailedOutcome,
     Field(discriminator="kind"),
 ]
 

@@ -32,6 +32,7 @@ from .models import (
     NormalizedMetric,
     NtruProblem,
     PreflightRequest,
+    PreflightUnknownOutcome,
     SisNorm,
     SisProblem,
     SparseTernary,
@@ -43,9 +44,8 @@ from .models import (
 )
 from .slow_estimate import (
     SLOW_ESTIMATE_RULE_VERSION,
-    SlowEstimate,
     arora_gb_estimate,
-    bkw_log2_cost,
+    bkw_estimate,
 )
 
 PUBLIC_TO_UPSTREAM = {
@@ -130,11 +130,7 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
     }
     results: list[AttackExecution] = []
     for attack in request.target_attacks:
-        estimate = (
-            arora_gb_estimate(params)
-            if attack is Attack.ARORA_GB
-            else SlowEstimate(bkw_log2_cost(params), {"model": "table_heuristic"})
-        )
+        estimate = arora_gb_estimate(params) if attack is Attack.ARORA_GB else bkw_estimate(params)
         if math.isfinite(estimate.log2_cost):
             metrics = {**preflight_metrics, **_preflight_diagnostics(estimate.diagnostics)}
             results.append(
@@ -151,10 +147,13 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
             results.append(
                 AttackExecution(
                     attack=attack,
-                    outcome=NoFiniteEstimateOutcome(
-                        kind="no_finite_estimate",
-                        code="preflight_no_finite_estimate",
-                        reason=f"{attack.value} preflight produced no finite estimate",
+                    outcome=PreflightUnknownOutcome(
+                        kind="preflight_unknown",
+                        code="bounded_search_no_finite_candidate",
+                        reason=(
+                            f"{attack.value} bounded preflight search found no finite "
+                            "candidate; exact estimation is required"
+                        ),
                         raw_result=normalized_audit,
                     ),
                 )

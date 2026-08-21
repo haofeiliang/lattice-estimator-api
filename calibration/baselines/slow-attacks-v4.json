@@ -1,0 +1,103 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-baseline",
+  "version": 4,
+  "generated_at": "2026-08-21T22:15:56+08:00",
+  "provenance": {
+    "estimator_commit": "53da5982597709ba0fdf94ea37a84d822310fd84",
+    "sage_version": "10.9",
+    "adapter_version": "3",
+    "preflight_rule_version": 4,
+    "platform": "linux/amd64"
+  },
+  "method": {
+    "kind": "structural_attack_models",
+    "fitted_coefficients": false,
+    "description": "Rule v4 retains the reviewed structural Arora-GB and coded-BKW equations from v3. Calibration extends their reviewed domains with complete centered-binomial and symmetric bounded-uniform error objects; it changes no fitted coefficient or parameter-specific correction."
+  },
+  "datasets": [
+    {
+      "purpose": "Rule-v3 discrete-Gaussian baseline inherited without changing either structural model",
+      "baseline": "calibration/baselines/slow-attacks-v3.json"
+    },
+    {
+      "purpose": "Reviewed bounded-error grid through n=1024 and q=4096",
+      "plan": "calibration/plans/bounded-errors-v2.json",
+      "plan_sha256": "cf82d0765ad1ad30434117ca6309c6d59acc466fbbfeadca9f6bb57c3ee34659",
+      "observations": 258,
+      "observations_sha256": "a63e0de486bb540eb956de21de1b47c67fb0af1b071bf773da32471cd02699ef"
+    },
+    {
+      "purpose": "Unlimited-sample bounded-error secret-diversity validation",
+      "plan": "calibration/plans/bounded-errors-diversity-v2.json",
+      "plan_sha256": "ae104769b26464834fc3650056d1c11e3ada8dd61e691e231b114dd20bb35333",
+      "observations": 96,
+      "observations_sha256": "58c3beafa12d8b9ce30ce02b85758aff36a3b1ee9d01d631fc3ff1868eaadd94"
+    },
+    {
+      "purpose": "Finite-sample bounded-error holdout used to delimit the reviewed Arora-GB domain and validate finite-sample BKW",
+      "plan": "calibration/plans/bounded-errors-finite-holdout-v2.json",
+      "plan_sha256": "525b8600ddec134026018d9ea42875b0677fa32ce7b518773b9fbed66e8ca94f",
+      "observations": 16,
+      "observations_sha256": "14cd9b79a6dce59973587ebcc92744ce425f80d0e71970d1c72cfa312ac84e72"
+    }
+  ],
+  "safety_cushion_bits": 8,
+  "attacks": {
+    "arora_gb": {
+      "reviewed_observations": 602,
+      "reviewed_comparable": 295,
+      "maximum_unsafe_error_bits": 1.9895196601282805e-12,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_one_uniform_margin_in_reviewed_domains",
+      "supported_preflight_domain": {
+        "discrete_gaussian": {
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "centered_binomial": {
+          "eta": "1_through_8",
+          "samples": "unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "uniform_integer": {
+          "bounds": "[-r,r]_for_integer_r_1_through_8",
+          "samples": "unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        }
+      },
+      "excluded_holdout": {
+        "domain": "finite_samples_with_bounded_error",
+        "maximum_unsafe_error_bits": 88.16999048538761,
+        "decision": "run_exact_arora_gb"
+      },
+      "runtime_note": "The n=1024,q=4096,centered-binomial eta=1 exact request timed out at 600 seconds; its quick result is not counted as comparable.",
+      "unknown_rule": "A preflight_unknown result always runs exact Arora-GB."
+    },
+    "bkw": {
+      "reviewed_observations": 626,
+      "reviewed_comparable": 565,
+      "maximum_unsafe_error_bits": 0.39403020087212326,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_one_uniform_margin_in_reviewed_domains",
+      "supported_preflight_domain": {
+        "discrete_gaussian": {
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "centered_binomial": {
+          "eta": "1_through_8",
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "uniform_integer": {
+          "bounds": "[-r,r]_for_integer_r_1_through_8",
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        }
+      },
+      "unknown_rule": "A preflight_unknown result always runs exact BKW."
+    }
+  }
+}

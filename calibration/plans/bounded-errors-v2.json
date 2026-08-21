@@ -1,0 +1,59 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-plan",
+  "version": 2,
+  "timeout_seconds": 600,
+  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "experiments": [
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [64, 128, 256, 512],
+        "modulus": ["256", "3329", "4096"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [{ "kind": "uniform_binary" }],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 2 },
+          { "kind": "centered_binomial", "eta": 4 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-2", "upper": "2" },
+          { "kind": "uniform_integer", "lower": "-4", "upper": "4" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    },
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [1024],
+        "modulus": ["4096"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [{ "kind": "uniform_binary" }],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" }
+        ]
+      }
+    },
+    {
+      "attack": "bkw",
+      "axes": {
+        "dimension": [64, 128, 256, 512, 1024],
+        "modulus": ["17", "256", "3329", "4096"],
+        "samples": [{ "kind": "unlimited" }],
+        "secret": [{ "kind": "uniform_binary" }],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 2 },
+          { "kind": "centered_binomial", "eta": 4 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-2", "upper": "2" },
+          { "kind": "uniform_integer", "lower": "-4", "upper": "4" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    }
+  ]
+}
