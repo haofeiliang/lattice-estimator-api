@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-SLOW_ESTIMATE_RULE_VERSION = 4
+SLOW_ESTIMATE_RULE_VERSION = 5
 ARORA_MAX_SOLVING_DEGREE = 256
 ARORA_GAUSSIAN_MAX_TAIL_SEARCH = 64
 ARORA_GAUSSIAN_REAL_PRECISION_BITS = 256
@@ -31,6 +31,16 @@ class _AroraCoreEstimate:
     degree: int
     tail: int
     samples: int
+
+
+@dataclass(frozen=True)
+class _AroraBoundedEstimate:
+    log2_cost: float
+    degree: int
+    error_degree: int
+    samples: int
+    log2_repetitions: float = 0.0
+    guessed_coordinates: int = 0
 
 
 @dataclass(frozen=True)
@@ -148,30 +158,26 @@ def _secret_equations(params: Any, dimension: int | None = None) -> tuple[tuple[
     return ()
 
 
-def _sample_aware_degree(n: int, error_degree: int, samples: Any) -> int:
-    if _is_infinite(samples):
-        return error_degree
-    try:
-        if int(samples) <= n * n:
-            return max(error_degree + 2, 2 * error_degree - 2)
-    except (TypeError, ValueError, OverflowError):
-        return max(error_degree + 2, 2 * error_degree - 2)
-    exponent = _log2_int_like(samples) / math.log2(n)
-    return error_degree + max(0, math.ceil(error_degree - exponent))
-
-
-def _arora_bounded(params: Any, omega: float) -> float:
-    n = int(params.n)
-    width = _bounds_width(params.Xe)
+def _arora_bounded_core(params: Any, omega: float, dimension: int) -> _AroraBoundedEstimate | None:
+    if dimension <= 0:
+        return None
+    reduced = params if dimension == int(params.n) else params.updated(n=dimension).normalize()
+    n = int(reduced.n)
+    width = _bounds_width(reduced.Xe)
     if width is None or width > 128:
-        return math.inf
+        return None
     maximum_samples = n**width
-    samples = maximum_samples if _is_infinite(params.m) else min(int(params.m), maximum_samples)
-    equations = ((width, samples), *_secret_equations(params))
+    samples = maximum_samples if _is_infinite(reduced.m) else min(int(reduced.m), maximum_samples)
+    equations = ((width, samples), *_secret_equations(reduced))
     degree = _semi_regular_dreg(n, equations)
     if degree is None:
-        degree = _sample_aware_degree(n, width, samples)
-    return omega * _log2_monomials(n, degree)
+        return None
+    return _AroraBoundedEstimate(
+        log2_cost=omega * _log2_monomials(n, degree),
+        degree=degree,
+        error_degree=width,
+        samples=samples,
+    )
 
 
 def _gaussian_tail_sample_count(sigma_value: Any, tail: int) -> int:
@@ -275,7 +281,7 @@ def _sparse_repetition_log2(n: int, h: int, zeta: int, base: int) -> float:
         return 0.0
     log_probability = -math.inf
     search_space = 0
-    best = math.inf
+    best: float | None = None
     for gamma in range(min(h, zeta)):
         log_term = (
             _log_combination(n - h, zeta - gamma)
@@ -293,10 +299,10 @@ def _sparse_repetition_log2(n: int, h: int, zeta: int, base: int) -> float:
                 1 if probability >= 0.99 else math.ceil(math.log(0.01) / math.log1p(-probability))
             )
             current = math.log2(trials) + math.log2(search_space)
-        if current >= best:
+        if best is not None and current >= best:
             break
         best = current
-    return best
+    return math.inf if best is None else best
 
 
 def _composition_cost(
@@ -429,12 +435,94 @@ def _arora_sparse_guessing(params: Any, omega: float) -> tuple[_AroraCoreEstimat
     return estimate, zeta
 
 
+def _arora_bounded_guessing(
+    params: Any, omega: float
+) -> tuple[_AroraBoundedEstimate, int, str] | None:
+    """Mirror upstream guess composition around the bounded Arora core."""
+    n = int(params.n)
+    baseline = _arora_bounded_core(params, omega, n)
+    if baseline is None:
+        return None
+
+    if bool(getattr(params.Xs, "is_sparse", False)):
+        h = int(getattr(params.Xs, "hamming_weight", 0))
+        width = _bounds_width(params.Xs)
+        if h > 0 and (width is None or width <= 1):
+            return None
+        base = 1 if h == 0 else width - 1
+        stop = n - 40
+        composition = "sparse_guessing"
+
+        def repetition(zeta: int) -> float:
+            return _sparse_repetition_log2(n, h, zeta, base)
+
+    else:
+        base = _dense_guess_base(params)
+        if base is None or base <= 1:
+            return baseline, 0, "no_guessing"
+        max_zeta = min(n - 1, math.floor(baseline.log2_cost / math.log2(base)))
+        stop = max_zeta + 1
+        composition = "dense_guessing"
+
+        def repetition(zeta: int) -> float:
+            return zeta * math.log2(base)
+
+    if stop <= 1:
+        return baseline, 0, composition
+
+    selected = _local_minimum(
+        0,
+        stop,
+        lambda zeta: _arora_bounded_composition(params, omega, n, zeta, repetition),
+        lambda current, incumbent: current.log2_cost <= incumbent.log2_cost,
+    )
+    # Guessing is optional. Preserve the no-guess baseline even if the
+    # upstream-style local search does not revisit the lower boundary.
+    if selected is None or baseline.log2_cost <= selected.log2_cost:
+        return baseline, 0, composition
+    return selected, selected.guessed_coordinates, composition
+
+
+def _arora_bounded_composition(
+    params: Any,
+    omega: float,
+    original_dimension: int,
+    zeta: int,
+    repetition: Any,
+) -> _AroraBoundedEstimate | None:
+    core = _arora_bounded_core(params, omega, original_dimension - zeta)
+    if core is None:
+        return None
+    log2_repetitions = repetition(zeta)
+    return replace(
+        core,
+        log2_cost=core.log2_cost + log2_repetitions,
+        log2_repetitions=log2_repetitions,
+        guessed_coordinates=zeta,
+    )
+
+
 def arora_gb_estimate(params: Any, omega: float = 2.0) -> SlowEstimate:
     """Return the reviewed Arora-GB estimate and its selected algebraic parameters."""
     normalized = params.normalize()
     if bool(getattr(normalized.Xe, "is_bounded", False)):
-        cost = _arora_bounded(normalized, omega)
-        return SlowEstimate(cost, {"model": "bounded"})
+        bounded = _arora_bounded_guessing(normalized, omega)
+        if bounded is None:
+            return SlowEstimate(math.inf, {"model": "bounded"})
+        selected, zeta, composition = bounded
+        return SlowEstimate(
+            selected.log2_cost,
+            {
+                "model": "bounded",
+                "composition": composition,
+                "error_degree": selected.error_degree,
+                "solving_degree": selected.degree,
+                "guessed_coordinates": zeta,
+                "reduced_dimension": int(normalized.n) - zeta,
+                "log2_samples": math.log2(selected.samples),
+                "log2_repetitions": selected.log2_repetitions,
+            },
+        )
     if not bool(getattr(normalized.Xe, "is_Gaussian_like", False)):
         return SlowEstimate(math.inf)
     if bool(getattr(normalized.Xs, "is_sparse", False)):
@@ -542,12 +630,12 @@ def _bkw_amplification_log2(log2_variance: float, log2_q: float) -> float:
     return math.log2(math.ceil(numerator / denominator))
 
 
-def _bkw_local_minimum(
+def _local_minimum(
     start: int,
     stop: int,
     evaluate: Any,
     better: Any,
-) -> _BkwEstimate | None:
+) -> Any | None:
     """Mirror estimator.util.local_minimum for integer parameters."""
     if stop <= start:
         return None
@@ -558,7 +646,7 @@ def _bkw_local_minimum(
     next_value: int | None = high
     last_value: int | None = None
     seen: set[int] = set()
-    best: _BkwEstimate | None = None
+    best: Any | None = None
     while (
         next_value is not None
         and next_value not in seen
@@ -727,7 +815,7 @@ def bkw_estimate(params: Any) -> SlowEstimate:
             return current.log2_cost <= incumbent.log2_cost and not sample_regression
 
         def evaluate_b(b: int) -> _BkwEstimate | None:
-            return _bkw_local_minimum(
+            return _local_minimum(
                 2,
                 max(3, n // b),
                 lambda total_t2: _bkw_cost(
@@ -743,7 +831,7 @@ def bkw_estimate(params: Any) -> SlowEstimate:
                 better,
             )
 
-        return _bkw_local_minimum(
+        return _local_minimum(
             2,
             3 * math.ceil(math.log2(q)),
             evaluate_b,

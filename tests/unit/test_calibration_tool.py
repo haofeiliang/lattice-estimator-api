@@ -76,18 +76,34 @@ def test_v2_bounded_error_plans_use_complete_error_objects() -> None:
         for item in requests
     )
 
+    finite_plan = json.loads(
+        (root / "calibration" / "plans" / "arora-bounded-finite-validation-v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    finite_requests = list(tool.requests_from_plan(finite_plan))
+    assert len(finite_requests) == 80
+    assert {item["problem"]["dimension"] for item in finite_requests} == {64, 256, 512}
+    assert {item["problem"]["samples"]["count"] for item in finite_requests} == {4096, 65536}
+    assert {item["problem"]["secret"]["kind"] for item in finite_requests} == {
+        "uniform_binary",
+        "fixed_weight_binary",
+        "fixed_weight_ternary",
+        "discrete_gaussian",
+    }
 
-def test_reviewed_v4_baseline_uses_one_margin_per_attack_and_delimits_domains() -> None:
+
+def test_reviewed_v5_baseline_uses_structural_guessing_and_one_margin_per_attack() -> None:
     root = Path(__file__).parents[2]
     baseline = json.loads(
-        (root / "calibration" / "baselines" / "slow-attacks-v4.json").read_text(encoding="utf-8")
+        (root / "calibration" / "baselines" / "slow-attacks-v5.json").read_text(encoding="utf-8")
     )
-    assert baseline["provenance"]["preflight_rule_version"] == 4
+    assert baseline["provenance"]["preflight_rule_version"] == 5
     assert baseline["method"]["fitted_coefficients"] is False
     assert baseline["attacks"]["arora_gb"]["production_margin_floor_bits"] == 10
     assert baseline["attacks"]["bkw"]["production_margin_floor_bits"] == 10
     assert baseline["attacks"]["bkw"]["maximum_unsafe_error_bits"] < 0.4
-    assert baseline["attacks"]["arora_gb"]["excluded_holdout"]["decision"] == "run_exact_arora_gb"
+    assert baseline["attacks"]["arora_gb"]["fixed_holdout"]["rule_v5_unsafe_error_bits"] < 1e-12
 
 
 def test_summary_uses_maximum_unsafe_quick_error_plus_cushion(tmp_path: Path) -> None:

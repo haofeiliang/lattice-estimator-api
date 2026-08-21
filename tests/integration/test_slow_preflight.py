@@ -36,7 +36,7 @@ def test_large_dimension_gaussian_preflight_covers_calibration_range(sigma: str)
     assert response.results[1].outcome.metrics["preflight_b"].kind == "integer"
     assert response.results[1].outcome.metrics["preflight_t1"].kind == "integer"
     assert response.results[1].outcome.metrics["preflight_t2"].kind == "integer"
-    assert response.results[1].outcome.metrics["preflight_rule_version"].value == "4"
+    assert response.results[1].outcome.metrics["preflight_rule_version"].value == "5"
     assert response.results[1].outcome.metrics["normalized_dimension"].value == "1024"
     assert "normalized_secret" in response.results[1].outcome.metrics
     assert "normalized_error" in response.results[1].outcome.metrics
@@ -116,8 +116,71 @@ def test_reviewed_unlimited_bounded_preflight_tracks_exact(
     exact = execute(EstimateRequest.model_validate(payload)).results[0].outcome
     assert preflight.kind == "computed"
     assert exact.kind == "computed"
-    assert preflight.metrics["preflight_rule_version"].value == "4"
+    assert preflight.metrics["preflight_rule_version"].value == "5"
     assert abs(float(preflight.security_bits) - float(exact.security_bits)) < 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("secret", "error", "expected_bits", "zeta", "degree"),
+    [
+        (
+            {"kind": "fixed_weight_binary", "hamming_weight": 64},
+            {"kind": "centered_binomial", "eta": 8},
+            236.8962420950805,
+            65,
+            33,
+        ),
+        (
+            {"kind": "uniform_ternary"},
+            {"kind": "centered_binomial", "eta": 1},
+            101.72389331798854,
+            3,
+            10,
+        ),
+        (
+            {"kind": "uniform_ternary"},
+            {"kind": "uniform_integer", "lower": "-1", "upper": "1"},
+            98.99302894442379,
+            1,
+            10,
+        ),
+    ],
+)
+def test_bounded_arora_guess_composition_matches_finite_sample_holdouts(
+    secret: dict[str, object],
+    error: dict[str, object],
+    expected_bits: float,
+    zeta: int,
+    degree: int,
+) -> None:
+    request = PreflightRequest.model_validate(
+        {
+            "operation": "preflight",
+            "schema_version": 2,
+            "problem": {
+                "kind": "lwe",
+                "dimension": 128,
+                "modulus": "4093",
+                "samples": {"kind": "finite", "count": 4096},
+                "secret": secret,
+                "error": error,
+            },
+            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "target_attacks": ["arora_gb"],
+            "timeout_seconds": 300,
+        }
+    )
+    outcome = execute_preflight(request).results[0].outcome
+    assert outcome.kind == "computed"
+    assert abs(float(outcome.security_bits) - expected_bits) < 0.001
+    assert outcome.metrics["preflight_rule_version"].value == "5"
+    assert outcome.metrics["preflight_composition"].value in {
+        "dense_guessing",
+        "sparse_guessing",
+    }
+    assert outcome.metrics["preflight_guessed_coordinates"].value == str(zeta)
+    assert outcome.metrics["preflight_solving_degree"].value == str(degree)
 
 
 @pytest.mark.integration

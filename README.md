@@ -17,11 +17,10 @@ They must be calibrated against `/v1/estimate` before changing the production
 stop margin. Calibration plans and tooling live under `calibration/` and
 `tools/`; the expensive matrix is intentionally not part of routine CI.
 
-Rule v4 reviews discrete-Gaussian errors plus centered-binomial eta 1 through 8
+Rule v5 reviews discrete-Gaussian errors plus centered-binomial eta 1 through 8
 and symmetric uniform integer `[-r,r]` for `r=1..8`. The Web scheduler applies
-one 10-bit margin per attack. Finite-sample bounded Arora-GB is deliberately
-excluded by calibration and must run exact; BKW admits finite or unlimited
-samples in the bounded domain. Unknown preflight outcomes always run exact.
+one 10-bit margin per attack. Arora-GB and BKW admit finite or unlimited samples
+in the reviewed bounded domain. Unknown preflight outcomes always run exact.
 
 The upstream estimator is installed as a Python package from the pinned
 `main` commit recorded in `pyproject.toml` and `uv.lock`. Runtime provenance is

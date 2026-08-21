@@ -263,7 +263,7 @@ def _metadata() -> MetadataResponse:
                 attacks=list(LWE_ATTACKS),
                 distributions=list(EXACT_DISTRIBUTIONS),
                 notes=[
-                    "rule-v4 arora_gb and structural coded-bkw preflight are calibrated "
+                    "rule-v5 arora_gb and structural coded-bkw preflight are calibrated "
                     "for production selection in their reviewed Gaussian and bounded domains"
                 ],
             ),

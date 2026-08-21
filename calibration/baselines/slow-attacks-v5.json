@@ -1,0 +1,106 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-baseline",
+  "version": 5,
+  "generated_at": "2026-08-21T22:53:26+08:00",
+  "provenance": {
+    "estimator_commit": "53da5982597709ba0fdf94ea37a84d822310fd84",
+    "sage_version": "10.9",
+    "adapter_version": "3",
+    "preflight_rule_version": 5,
+    "platform": "linux/amd64"
+  },
+  "method": {
+    "kind": "structural_attack_models",
+    "fitted_coefficients": false,
+    "description": "Rule v5 composes the bounded Arora-GB core with the pinned estimator's dense or sparse secret guessing, including reduced-dimension normalization, sparse drop probability, search space, repetition cost, and local-minimum semantics. No calibration-derived correction is applied. BKW is unchanged from rule v4."
+  },
+  "datasets": [
+    {
+      "purpose": "Rule-v4 reviewed baseline and exact observations",
+      "baseline": "calibration/baselines/slow-attacks-v4.json"
+    },
+    {
+      "purpose": "Rule-v5 bounded-error main-grid replay",
+      "observations": 258,
+      "preflight_replay_sha256": "7674e7271649abc0059cb47a86839e9cbc18d88ee5ee501768d3970603141a0b"
+    },
+    {
+      "purpose": "Rule-v5 bounded-error secret-diversity replay",
+      "observations": 96,
+      "preflight_replay_sha256": "f9ecc0b50a4df372df03fe969cf705a9e3a61265ca358c9afc83e0b744d0378c"
+    },
+    {
+      "purpose": "Original finite-sample bounded-error holdout replay",
+      "observations": 16,
+      "preflight_replay_sha256": "9d0d4e8c35ffb41b73ad89323efd0d2749b5985be07bcfde3cc7d9b74e887bf8"
+    },
+    {
+      "purpose": "Independent finite-sample bounded Arora-GB validation over n=64,256,512; q=256,3329,4096; m=4096,65536; and four secret families",
+      "plan": "calibration/plans/arora-bounded-finite-validation-v2.json",
+      "plan_sha256": "91ee9a9c6495fcb79827428841ae087a550f80c5e786372ec45c6dd178a40c17",
+      "observations": 80,
+      "preflight_replay_sha256": "eb31e118e1b65940f4656a95b44fc757d93562ea998ab98f43d2e6d0d8af34b3"
+    },
+    {
+      "purpose": "Gaussian finite-sample and sparse-secret regression replay",
+      "observations": 36,
+      "preflight_replay_sha256": [
+        "7b2efc0622b2e6a5f34ea0835e28314b3e26ea8184eb7c0f7b3824781a69b9a0",
+        "7fb2d4eab7354f18fb67100dc75509b50d537e440ea018783d1c8fc227cb3667"
+      ]
+    }
+  ],
+  "safety_cushion_bits": 8,
+  "attacks": {
+    "arora_gb": {
+      "reviewed_observations": 690,
+      "reviewed_comparable": 361,
+      "bounded_rule_v5_observations": 234,
+      "bounded_rule_v5_comparable": 193,
+      "bounded_rule_v5_maximum_unsafe_error_bits": 1.1652900866465643e-12,
+      "maximum_unsafe_error_bits": 1.9895196601282805e-12,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_one_uniform_margin_in_reviewed_domains",
+      "supported_preflight_domain": {
+        "discrete_gaussian": {
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "centered_binomial": {
+          "eta": "1_through_8",
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        },
+        "uniform_integer": {
+          "bounds": "[-r,r]_for_integer_r_1_through_8",
+          "samples": "finite_or_unlimited",
+          "secret": "all_currently_supported_secret_distributions"
+        }
+      },
+      "fixed_holdout": {
+        "problem": "n=128,q=4093,m=4096,fixed-weight-binary h=64,centered-binomial eta=8",
+        "rule_v4_unsafe_error_bits": 88.16999048538761,
+        "rule_v5_unsafe_error_bits": 1.4210854715202004e-13,
+        "selected_zeta": 65,
+        "reduced_dimension": 63,
+        "solving_degree": 33
+      },
+      "unknown_rule": "A preflight_unknown result always runs exact Arora-GB."
+    },
+    "bkw": {
+      "reviewed_observations": 626,
+      "reviewed_comparable": 565,
+      "maximum_unsafe_error_bits": 0.39403020087212326,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "unchanged_rule_v4_model_with_one_uniform_margin",
+      "supported_preflight_domain": {
+        "discrete_gaussian": "finite_or_unlimited_samples",
+        "centered_binomial_eta_1_through_8": "finite_or_unlimited_samples",
+        "uniform_integer_radius_1_through_8": "finite_or_unlimited_samples"
+      },
+      "unknown_rule": "A preflight_unknown result always runs exact BKW."
+    }
+  }
+}

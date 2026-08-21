@@ -27,9 +27,11 @@ Plan format v2 accepts complete error-distribution objects under the `error`
 axis. `bounded-errors-v2.json` covers centered binomial eta 1, 2, 4, and 8 and
 symmetric uniform integer radii 1, 2, 4, and 8, with `n` through 1024 and `q`
 through 4096. `bounded-errors-diversity-v2.json` varies the secret under
-unlimited samples. The finite-sample cases are deliberately separated into
-`bounded-errors-finite-holdout-v2.json` because that holdout delimits the
-reviewed Arora-GB domain.
+unlimited samples. `bounded-errors-finite-holdout-v2.json` preserves the case
+that exposed the missing bounded secret-guessing composition in rule v4, and
+`arora-bounded-finite-validation-v2.json` independently validates its rule-v5
+replacement across dimensions through 512, two sample counts, three moduli,
+and four secret families.
 
 With a locally running API:
 
@@ -71,13 +73,15 @@ each attack. Failed, timed-out, and non-finite pairs never justify skipping an
 attack.
 
 The current reviewed result is
-`calibration/baselines/slow-attacks-v4.json`. The discrete-Gaussian v3 evidence
-is retained. Across 127 new comparable unlimited-sample bounded-error Arora-GB
-observations, the largest unsafe error was about `1.2e-12` bit. The finite
-bounded-error holdout exposed an 88.170-bit underestimate, so finite-sample
-bounded Arora-GB remains outside the reviewed domain and always runs exact.
-The one Arora-GB production margin remains a 10-bit floor across all reviewed
-Gaussian and bounded domains; user configuration may only raise it.
+`calibration/baselines/slow-attacks-v5.json`. Rule v5 composes the bounded core
+with the pinned estimator's dense or sparse secret guessing. It reproduces the
+former 88.170-bit failure to about `1.4e-13` bit and selects the same `zeta=65`,
+reduced dimension 63, and solving degree 33. Across 193 comparable bounded
+observations, including 80 independent finite-sample cases, the largest unsafe
+error is about `1.2e-12` bit. Gaussian sparse/finite regression replay remains
+within about `1.1e-12` bit. Finite and unlimited samples are therefore reviewed
+for bounded Arora-GB. The one Arora-GB production margin remains a 10-bit floor;
+user configuration may only raise it.
 
 The old BKW table heuristic had a 527.883-bit worst unsafe error. It has been
 replaced by a structural log-domain implementation of the pinned coded-BKW

@@ -1,0 +1,65 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-plan",
+  "version": 2,
+  "timeout_seconds": 600,
+  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "experiments": [
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [64, 256],
+        "modulus": ["256", "4096"],
+        "samples": [
+          { "kind": "finite", "count": 4096 },
+          { "kind": "finite", "count": 65536 }
+        ],
+        "secret": [
+          { "kind": "uniform_binary" },
+          { "kind": "fixed_weight_binary", "hamming_weight": 32 }
+        ],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    },
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [512],
+        "modulus": ["4096"],
+        "samples": [{ "kind": "finite", "count": 65536 }],
+        "secret": [
+          { "kind": "uniform_binary" },
+          { "kind": "fixed_weight_binary", "hamming_weight": 32 }
+        ],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    },
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [256],
+        "modulus": ["3329"],
+        "samples": [{ "kind": "finite", "count": 65536 }],
+        "secret": [
+          { "kind": "discrete_gaussian", "standard_deviation": "1.2" },
+          { "kind": "fixed_weight_ternary", "positive_weight": 16, "negative_weight": 16 }
+        ],
+        "error": [
+          { "kind": "centered_binomial", "eta": 1 },
+          { "kind": "centered_binomial", "eta": 8 },
+          { "kind": "uniform_integer", "lower": "-1", "upper": "1" },
+          { "kind": "uniform_integer", "lower": "-8", "upper": "8" }
+        ]
+      }
+    }
+  ]
+}
