@@ -274,6 +274,23 @@ class EstimateRequest(StrictModel):
         return self
 
 
+class PreflightRequest(EstimateRequest):
+    """Request attack-specific cheap estimates without running the attacks."""
+
+    operation: Literal["preflight"] = "preflight"
+
+    @model_validator(mode="after")
+    def only_slow_lwe_attacks_are_allowed(self) -> PreflightRequest:
+        if not isinstance(self.problem, LweProblem):
+            raise ValueError("preflight is only available for LWE")
+        unsupported = [
+            attack.value for attack in self.target_attacks if attack not in LWE_SLOW_ATTACKS
+        ]
+        if unsupported:
+            raise ValueError(f"preflight only supports arora_gb and bkw: {', '.join(unsupported)}")
+        return self
+
+
 class IntegerMetric(StrictModel):
     kind: Literal["integer"]
     value: CanonicalSignedInteger

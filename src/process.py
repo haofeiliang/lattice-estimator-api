@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .models import EstimateRequest, WorkerResponse
+from .models import EstimateRequest, PreflightRequest, WorkerResponse
 
 
 class WorkerRunError(RuntimeError):
@@ -64,7 +64,9 @@ class SageProcessRunner:
     def __init__(self, settings: ProcessSettings) -> None:
         self._settings = settings
 
-    async def run(self, request: EstimateRequest, cancellation: asyncio.Event) -> WorkerResponse:
+    async def run(
+        self, request: EstimateRequest | PreflightRequest, cancellation: asyncio.Event
+    ) -> WorkerResponse:
         if cancellation.is_set():
             raise WorkerCancelledError("worker request was cancelled before launch")
         creation: dict[str, Any] = {}
@@ -121,7 +123,7 @@ class SageProcessRunner:
 
     def _decode_response(
         self,
-        request: EstimateRequest,
+        request: EstimateRequest | PreflightRequest,
         return_code: int | None,
         stdout: bytes,
         stderr: bytes,

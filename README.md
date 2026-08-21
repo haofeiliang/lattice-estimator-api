@@ -10,6 +10,12 @@ and descendant-process cleanup remain enforceable.
 - `GET /healthz`
 - `GET /v1/metadata`
 - `POST /v1/estimate`
+- `POST /v1/preflight` — cheap Arora-GB/BKW estimates used by the Web scheduler
+
+The preflight values are attack-selection estimates, not security reports.
+They must be calibrated against `/v1/estimate` before changing the production
+stop margin. Calibration plans and tooling live under `calibration/` and
+`tools/`; the expensive matrix is intentionally not part of routine CI.
 
 The upstream estimator is installed as a Python package from the pinned
 `main` commit recorded in `pyproject.toml` and `uv.lock`. Runtime provenance is

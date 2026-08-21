@@ -10,6 +10,7 @@ from src.models import (
     AttackExecution,
     ComputedOutcome,
     EstimateRequest,
+    PreflightRequest,
     WorkerResponse,
 )
 
@@ -17,7 +18,12 @@ from src.models import (
 def main() -> int:
     mode = sys.argv[1]
     payload = sys.stdin.buffer.read()
-    request = EstimateRequest.model_validate_json(payload)
+    raw = json.loads(payload)
+    request = (
+        PreflightRequest.model_validate(raw)
+        if raw.get("operation") == "preflight"
+        else EstimateRequest.model_validate(raw)
+    )
     if mode == "sleep":
         time.sleep(60)
         return 0

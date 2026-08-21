@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from src.models import Attack, EstimateRequest, attacks_for_problem
+from src.models import Attack, EstimateRequest, PreflightRequest, attacks_for_problem
 
 
 def request_data() -> dict[str, object]:
@@ -59,6 +59,18 @@ def test_lwe_exposes_fast_and_adaptive_slow_attacks() -> None:
     )
     assert Attack("arora_gb") is Attack.ARORA_GB
     assert Attack("bkw") is Attack.BKW
+
+
+def test_preflight_only_accepts_slow_lwe_attacks() -> None:
+    source = request_data()
+    source["operation"] = "preflight"
+    source["target_attacks"] = ["arora_gb", "bkw"]
+    request = PreflightRequest.model_validate(source)
+    assert request.operation == "preflight"
+
+    source["target_attacks"] = ["usvp"]
+    with pytest.raises(ValidationError, match="preflight only supports"):
+        PreflightRequest.model_validate(source)
 
 
 @pytest.mark.parametrize(

@@ -7,15 +7,20 @@ import sys
 
 from pydantic import ValidationError
 
-from .adapter import execute
-from .models import EstimateRequest
+from .adapter import execute, execute_preflight
+from .models import EstimateRequest, PreflightRequest
 
 
 def main() -> int:
     source = sys.stdin.buffer.read()
     try:
-        request = EstimateRequest.model_validate_json(source)
-        response = execute(request)
+        raw = json.loads(source)
+        if raw.get("operation") == "preflight":
+            request = PreflightRequest.model_validate(raw)
+            response = execute_preflight(request)
+        else:
+            request = EstimateRequest.model_validate(raw)
+            response = execute(request)
     except ValidationError as error:
         print(
             json.dumps(

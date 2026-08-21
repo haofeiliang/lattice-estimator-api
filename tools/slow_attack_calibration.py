@@ -1,0 +1,310 @@
+"""Collect and summarize slow-attack preflight calibration observations."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import itertools
+import json
+import math
+import urllib.error
+import urllib.request
+from collections import Counter, defaultdict
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any
+
+PLAN_FORMAT = "lattice-estimator/slow-attack-calibration-plan"
+OBSERVATION_FORMAT = "lattice-estimator/slow-attack-calibration-observation"
+
+
+def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    if plan.get("format") != PLAN_FORMAT or plan.get("version") != 1:
+        raise ValueError("unsupported calibration plan")
+    for experiment in plan["experiments"]:
+        axes = experiment["axes"]
+        for model, n, q, samples, secret, sigma in itertools.product(
+            plan["models"],
+            axes["dimension"],
+            axes["modulus"],
+            axes["samples"],
+            axes["secret"],
+            axes["error_standard_deviation"],
+        ):
+            yield {
+                "schema_version": 2,
+                "problem": {
+                    "kind": "lwe",
+                    "dimension": n,
+                    "modulus": q,
+                    "samples": samples,
+                    "secret": secret,
+                    "error": {
+                        "kind": "discrete_gaussian",
+                        "standard_deviation": sigma,
+                    },
+                },
+                "models": model,
+                "target_attacks": [experiment["attack"]],
+                "timeout_seconds": plan["timeout_seconds"],
+            }
+
+
+def _post(
+    url: str,
+    payload: dict[str, Any],
+    client_timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, separators=(",", ":")).encode(),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        timeout = client_timeout_seconds or payload["timeout_seconds"] + 30
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"{url} returned {error.code}: {detail}") from error
+
+
+def _identity(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _result(response: dict[str, Any]) -> dict[str, Any]:
+    return response["results"][0]["outcome"]
+
+
+def _collect_one(payload: dict[str, Any], base_url: str) -> dict[str, Any]:
+    identity = _identity(payload)
+    preflight_payload = {**payload, "operation": "preflight"}
+    try:
+        preflight = _post(
+            f"{base_url.rstrip('/')}/v1/preflight",
+            preflight_payload,
+            client_timeout_seconds=min(payload["timeout_seconds"] + 30, 120),
+        )
+        preflight_outcome = _result(preflight)
+    except (RuntimeError, OSError, TimeoutError) as error:
+        preflight = None
+        preflight_outcome = {"kind": "collection_failed", "message": str(error)}
+    try:
+        exact = _post(f"{base_url.rstrip('/')}/v1/estimate", payload)
+        exact_outcome = _result(exact)
+    except (RuntimeError, OSError, TimeoutError) as error:
+        exact = None
+        exact_outcome = {"kind": "collection_failed", "message": str(error)}
+    return {
+        "format": OBSERVATION_FORMAT,
+        "version": 1,
+        "identity": identity,
+        "request": payload,
+        "preflight": preflight_outcome,
+        "preflight_duration_ms": None if preflight is None else preflight.get("duration_ms"),
+        "exact": exact_outcome,
+        "exact_duration_ms": None if exact is None else exact.get("duration_ms"),
+        "provenance": (exact or preflight or {}).get("provenance"),
+    }
+
+
+def collect(plan_path: Path, output: Path, base_url: str, workers: int) -> None:
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    existing: set[str] = set()
+    if output.exists():
+        existing = {
+            json.loads(line)["identity"]
+            for line in output.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+    planned_requests = requests_from_plan(plan)
+    pending = [payload for payload in planned_requests if _identity(payload) not in existing]
+    completed = len(existing)
+    total = completed + len(pending)
+    with (
+        output.open("a", encoding="utf-8") as destination,
+        ThreadPoolExecutor(max_workers=workers) as executor,
+    ):
+        futures = {executor.submit(_collect_one, payload, base_url) for payload in pending}
+        for future in as_completed(futures):
+            row = future.result()
+            destination.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+            destination.flush()
+            completed += 1
+            print(f"collected {completed}/{total}", flush=True)
+
+
+def _replay_one(row: dict[str, Any], base_url: str) -> dict[str, Any]:
+    payload = row["request"]
+    preflight_payload = {**payload, "operation": "preflight"}
+    try:
+        preflight = _post(
+            f"{base_url.rstrip('/')}/v1/preflight",
+            preflight_payload,
+            client_timeout_seconds=min(payload["timeout_seconds"] + 30, 120),
+        )
+        preflight_outcome = _result(preflight)
+    except (RuntimeError, OSError, TimeoutError) as error:
+        preflight = None
+        preflight_outcome = {"kind": "collection_failed", "message": str(error)}
+    return {
+        "format": OBSERVATION_FORMAT,
+        "version": 1,
+        "identity": row["identity"],
+        "request": payload,
+        "preflight": preflight_outcome,
+        "preflight_duration_ms": None if preflight is None else preflight.get("duration_ms"),
+        "exact": row["exact"],
+        "exact_duration_ms": row.get("exact_duration_ms"),
+        "provenance": row.get("provenance"),
+        "preflight_provenance": None if preflight is None else preflight.get("provenance"),
+    }
+
+
+def replay_preflight(source: Path, output: Path, base_url: str, workers: int) -> None:
+    """Re-run only preflight while preserving exact outcomes from a pinned dataset."""
+    source_lines = source.read_text(encoding="utf-8").splitlines()
+    source_rows = [json.loads(line) for line in source_lines if line.strip()]
+    existing: set[str] = set()
+    if output.exists():
+        existing = {
+            json.loads(line)["identity"]
+            for line in output.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+    pending = [row for row in source_rows if row["identity"] not in existing]
+    completed = len(existing)
+    total = completed + len(pending)
+    with (
+        output.open("a", encoding="utf-8") as destination,
+        ThreadPoolExecutor(max_workers=workers) as executor,
+    ):
+        futures = {executor.submit(_replay_one, row, base_url) for row in pending}
+        for future in as_completed(futures):
+            row = future.result()
+            destination.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+            destination.flush()
+            completed += 1
+            print(f"replayed {completed}/{total}", flush=True)
+
+
+def _computed_bits(outcome: dict[str, Any]) -> float | None:
+    if outcome.get("kind") != "computed":
+        return None
+    value = float(outcome["security_bits"])
+    return value if math.isfinite(value) else None
+
+
+def _duration_summary(values: list[int]) -> dict[str, int] | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return {
+        "count": len(ordered),
+        "minimum": ordered[0],
+        "median": ordered[len(ordered) // 2],
+        "p95": ordered[min(len(ordered) - 1, math.floor(len(ordered) * 0.95))],
+        "maximum": ordered[-1],
+    }
+
+
+def summarize(inputs: list[Path], output: Path, cushion: float) -> None:
+    deltas: dict[str, list[float]] = defaultdict(list)
+    counts: dict[str, int] = defaultdict(int)
+    preflight_outcomes: dict[str, Counter[str]] = defaultdict(Counter)
+    exact_outcomes: dict[str, Counter[str]] = defaultdict(Counter)
+    preflight_durations: dict[str, list[int]] = defaultdict(list)
+    exact_durations: dict[str, list[int]] = defaultdict(list)
+    worst: dict[str, tuple[float, dict[str, Any] | None]] = {}
+    for path in inputs:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            attack = row["request"]["target_attacks"][0]
+            quick = _computed_bits(row["preflight"])
+            exact = _computed_bits(row["exact"])
+            counts[attack] += 1
+            preflight_outcomes[attack][row["preflight"]["kind"]] += 1
+            exact_outcomes[attack][row["exact"]["kind"]] += 1
+            if isinstance(row.get("preflight_duration_ms"), int):
+                preflight_durations[attack].append(row["preflight_duration_ms"])
+            if isinstance(row.get("exact_duration_ms"), int):
+                exact_durations[attack].append(row["exact_duration_ms"])
+            if quick is not None and exact is not None:
+                delta = quick - exact
+                deltas[attack].append(delta)
+                if attack not in worst or delta > worst[attack][0]:
+                    worst[attack] = (delta, row["request"].get("problem"))
+    attacks = {}
+    for attack in sorted(counts):
+        values = deltas[attack]
+        maximum = max([0.0, *values])
+        attacks[attack] = {
+            "observations": counts[attack],
+            "comparable": len(values),
+            "maximum_unsafe_error_bits": maximum,
+            "recommended_margin_bits": math.ceil(maximum + cushion),
+            "preflight_outcomes": dict(sorted(preflight_outcomes[attack].items())),
+            "exact_outcomes": dict(sorted(exact_outcomes[attack].items())),
+            "preflight_duration_ms": _duration_summary(preflight_durations[attack]),
+            "exact_duration_ms": _duration_summary(exact_durations[attack]),
+        }
+        if attack in worst and worst[attack][1] is not None:
+            attacks[attack]["worst_observed_problem"] = worst[attack][1]
+    output.write_text(
+        json.dumps(
+            {
+                "format": "lattice-estimator/slow-attack-calibration-summary",
+                "version": 1,
+                "safety_cushion_bits": cushion,
+                "attacks": attacks,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    collect_parser = commands.add_parser("collect")
+    collect_parser.add_argument("--plan", type=Path, required=True)
+    collect_parser.add_argument("--output", type=Path, required=True)
+    collect_parser.add_argument("--estimator-url", default="http://127.0.0.1:8000")
+    collect_parser.add_argument("--workers", type=int, default=3)
+    replay_parser = commands.add_parser("replay-preflight")
+    replay_parser.add_argument("--input", type=Path, required=True)
+    replay_parser.add_argument("--output", type=Path, required=True)
+    replay_parser.add_argument("--estimator-url", default="http://127.0.0.1:8000")
+    replay_parser.add_argument("--workers", type=int, default=3)
+    summary_parser = commands.add_parser("summarize")
+    summary_parser.add_argument("--input", type=Path, action="append", required=True)
+    summary_parser.add_argument("--output", type=Path, required=True)
+    summary_parser.add_argument("--safety-cushion-bits", type=float, default=8.0)
+    arguments = parser.parse_args()
+    if arguments.command in {"collect", "replay-preflight"}:
+        if arguments.workers < 1:
+            raise ValueError("workers must be positive")
+    if arguments.command == "collect":
+        collect(arguments.plan, arguments.output, arguments.estimator_url, arguments.workers)
+    elif arguments.command == "replay-preflight":
+        replay_preflight(
+            arguments.input,
+            arguments.output,
+            arguments.estimator_url,
+            arguments.workers,
+        )
+    else:
+        summarize(arguments.input, arguments.output, arguments.safety_cushion_bits)
+
+
+if __name__ == "__main__":
+    main()

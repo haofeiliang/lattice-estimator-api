@@ -36,6 +36,7 @@ from .models import (
     EstimatorProvenance,
     HealthResponse,
     MetadataResponse,
+    PreflightRequest,
     SupportMatrixEntry,
 )
 from .process import (
@@ -201,6 +202,28 @@ def create_app(
             monitor.cancel()
             await asyncio.gather(monitor, return_exceptions=True)
 
+    @app.post("/v1/preflight", response_model=EstimateResponse)
+    async def preflight(payload: PreflightRequest, request: Request) -> EstimateResponse:
+        """Estimate Arora-GB/BKW cost cheaply without executing either attack."""
+        cancellation = asyncio.Event()
+        monitor = asyncio.create_task(_monitor_disconnect(request, cancellation))
+        acquired = False
+        try:
+            acquired = await _acquire_or_cancel(semaphore, cancellation)
+            if not acquired:
+                raise WorkerCancelledError("request disconnected before worker execution")
+            worker = await process_runner.run(payload, cancellation)
+            return EstimateResponse(
+                results=worker.results,
+                duration_ms=worker.duration_ms,
+                provenance=_provenance(),
+            )
+        finally:
+            if acquired:
+                semaphore.release()
+            monitor.cancel()
+            await asyncio.gather(monitor, return_exceptions=True)
+
     return app
 
 
@@ -239,7 +262,10 @@ def _metadata() -> MetadataResponse:
             "lwe": SupportMatrixEntry(
                 attacks=list(LWE_ATTACKS),
                 distributions=list(EXACT_DISTRIBUTIONS),
-                notes=["arora_gb and bkw are controlled by the Rust adaptive policy"],
+                notes=[
+                    "arora_gb preflight is calibrated for production selection; "
+                    "bkw preflight is research-only"
+                ],
             ),
             "ntru": SupportMatrixEntry(
                 attacks=list(NTRU_ATTACKS),

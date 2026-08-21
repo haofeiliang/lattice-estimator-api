@@ -1,0 +1,95 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-baseline",
+  "version": 2,
+  "generated_at": "2026-08-21T19:03:04+08:00",
+  "provenance": {
+    "estimator_commit": "53da5982597709ba0fdf94ea37a84d822310fd84",
+    "sage_version": "10.9",
+    "adapter_version": "3",
+    "preflight_rule_version": 2,
+    "platform": "linux/amd64"
+  },
+  "method": {
+    "kind": "structural_attack_model",
+    "fitted_coefficients": false,
+    "description": "The preflight reproduces the upstream Gaussian tail, semi-regular Hilbert-series solving degree, and dense or sparse guessing composition in a bounded search. Calibration measures error and selects one safety margin; it does not fit the model."
+  },
+  "datasets": [
+    {
+      "purpose": "broad replay, n through 1024, q through 4096, sigma 0.3 through 4.0",
+      "plan": "calibration/plans/slow-attacks-v1.json",
+      "plan_sha256": "0e65b3b442e6c7eed21ef3aaba1a320d41a0d752bf619bc7aabed820a334b84a",
+      "exact_observations": 624,
+      "exact_observations_sha256": "7e11a500fa5f1de8f23eb22154eea7383953e17ff9b2a9ff1fe894579497fbcb",
+      "preflight_replay_sha256": "1acb367ae8a8aa5abf0b0c58948083b9e21f6653dc012a022f2e8910ff76ce23"
+    },
+    {
+      "purpose": "n=1024 long-timeout holdout",
+      "plan": "calibration/plans/arora-n1024-holdout-v1.json",
+      "plan_sha256": "4b1b85b9f55b9b4cdbb0e589cd651ce7eaf45d4ea0d3a636e4a627eaab2358c9",
+      "exact_observations": 6,
+      "exact_observations_sha256": "bb00345f6420d7c682e6d28a863553bafad732adb1f25d8eda006f1f1e991f74",
+      "preflight_replay_sha256": "ccdc6f883aab41119503417d91866defc3e67c80f0ed27b06c92adc9f217ef70"
+    },
+    {
+      "purpose": "independent q=4093 validation grid",
+      "plan": "calibration/plans/arora-v2-validation-v1.json",
+      "plan_sha256": "fba4258445a08c9e9bc56a969bedc60c384d49c761b0454f6bc739c7f71e8dd0",
+      "exact_observations": 30,
+      "exact_observations_sha256": "5cfc188c23941a6f89f9304f622223644832160dc077a0730ee0b6aa7de1d21f",
+      "preflight_replay_sha256": "a312bfe929311ac923aa6af8f6af616acc8f0aff7522b44e1b52a4730c4c6437"
+    },
+    {
+      "purpose": "finite samples and binary, ternary, fixed-weight binary, and fixed-weight ternary secrets",
+      "plans": [
+        "calibration/plans/arora-v2-diversity-smoke-v1.json",
+        "calibration/plans/arora-v2-finite-samples-smoke-v1.json"
+      ],
+      "plan_sha256": [
+        "9ee09c755d48577d8f002e295c2eefe43cbbfa8e20716e5284951ffe039cfc0f",
+        "8d80d567e7ee46517a2ab6e92a1ac023f696cf453e187399ef9a0175a2f54001"
+      ],
+      "exact_observations": 36,
+      "exact_observations_sha256": [
+        "c32d208eadda191156e5020dbf70c0e4a8ab1a297b1ac3b0ec9a07bfe1d434ef",
+        "fb6f26f8e9c32b3c03553cd4bcb95c98ffd342275817b5845964d141259058f2"
+      ],
+      "preflight_replay_sha256": [
+        "2ea50abfdfaa1d7ba0cc962f19d823ce945b443c592347311790cb950ba8c85b",
+        "b3c2e435e08a730846819aeb2f6d138aedfd7a5f32456e38bd3ee22d91890882"
+      ]
+    },
+    {
+      "purpose": "exact BKW runtime",
+      "plan": "calibration/plans/bkw-runtime-validation-v1.json",
+      "plan_sha256": "f5415b636e09699543f0d0abcc64c9b3124a7f326decc96e3dd19885c1ef174f",
+      "exact_observations": 18,
+      "exact_observations_sha256": "0893621666357b96f4e16a32d21001335530396dcbfa7448a1b60e075d90d316"
+    }
+  ],
+  "safety_cushion_bits": 8,
+  "attacks": {
+    "arora_gb": {
+      "observations": 456,
+      "comparable": 168,
+      "maximum_unsafe_error_bits": 1.9895196601282805e-12,
+      "calculated_margin_bits": 9,
+      "production_margin_floor_bits": 10,
+      "decision": "use_structural_preflight_with_margin",
+      "supported_preflight_domain": {
+        "error": "discrete_gaussian",
+        "samples": "finite_or_unlimited",
+        "secret": "all currently supported secret distributions"
+      },
+      "non_finite_rule": "A non-finite preflight never skips exact Arora-GB."
+    },
+    "bkw": {
+      "observations": 240,
+      "comparable": 124,
+      "maximum_unsafe_error_bits": 527.883070220088,
+      "worst_parameter": { "n": 1024, "q": "4096", "sigma": "3.2" },
+      "decision": "do_not_use_preflight_for_production_skipping",
+      "reason": "The quick table heuristic is not a faithful coded-BKW model. Exact BKW took 2.279 to 3.782 seconds in the 18-point runtime check (median 2.670 seconds), so the scheduler runs exact BKW and caches it."
+    }
+  }
+}

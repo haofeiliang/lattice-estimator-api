@@ -31,6 +31,7 @@ from .models import (
     NoFiniteEstimateOutcome,
     NormalizedMetric,
     NtruProblem,
+    PreflightRequest,
     SisNorm,
     SisProblem,
     SparseTernary,
@@ -39,6 +40,12 @@ from .models import (
     UniformInteger,
     UniformTernary,
     WorkerResponse,
+)
+from .slow_estimate import (
+    SLOW_ESTIMATE_RULE_VERSION,
+    SlowEstimate,
+    arora_gb_estimate,
+    bkw_log2_cost,
 )
 
 PUBLIC_TO_UPSTREAM = {
@@ -99,6 +106,80 @@ def execute(request: EstimateRequest) -> WorkerResponse:
     )
 
 
+def execute_preflight(request: PreflightRequest) -> WorkerResponse:
+    """Compute cheap attack-specific estimates in the Sage worker."""
+    started = time.monotonic()
+    params = _lwe_parameters(request.problem)
+    normalized = params.normalize()
+    normalized_audit = {
+        "dimension": str(normalized.n),
+        "modulus": str(normalized.q),
+        "samples": str(normalized.m),
+        "secret": str(normalized.Xs),
+        "error": str(normalized.Xe),
+    }
+    preflight_metrics: dict[str, NormalizedMetric] = {
+        "preflight_rule_version": IntegerMetric(
+            kind="integer", value=str(SLOW_ESTIMATE_RULE_VERSION)
+        ),
+        "normalized_dimension": IntegerMetric(kind="integer", value=str(normalized.n)),
+        "normalized_modulus": IntegerMetric(kind="integer", value=str(normalized.q)),
+        "normalized_samples": TextMetric(kind="text", value=str(normalized.m)),
+        "normalized_secret": TextMetric(kind="text", value=str(normalized.Xs)),
+        "normalized_error": TextMetric(kind="text", value=str(normalized.Xe)),
+    }
+    results: list[AttackExecution] = []
+    for attack in request.target_attacks:
+        estimate = (
+            arora_gb_estimate(params)
+            if attack is Attack.ARORA_GB
+            else SlowEstimate(bkw_log2_cost(params), {"model": "table_heuristic"})
+        )
+        if math.isfinite(estimate.log2_cost):
+            metrics = {**preflight_metrics, **_preflight_diagnostics(estimate.diagnostics)}
+            results.append(
+                AttackExecution(
+                    attack=attack,
+                    outcome=ComputedOutcome(
+                        kind="computed",
+                        security_bits=_canonical_decimal(estimate.log2_cost),
+                        metrics=metrics,
+                    ),
+                )
+            )
+        else:
+            results.append(
+                AttackExecution(
+                    attack=attack,
+                    outcome=NoFiniteEstimateOutcome(
+                        kind="no_finite_estimate",
+                        code="preflight_no_finite_estimate",
+                        reason=f"{attack.value} preflight produced no finite estimate",
+                        raw_result=normalized_audit,
+                    ),
+                )
+            )
+    return WorkerResponse(
+        results=results,
+        duration_ms=max(0, round((time.monotonic() - started) * 1_000)),
+    )
+
+
+def _preflight_diagnostics(
+    diagnostics: dict[str, int | float | str],
+) -> dict[str, NormalizedMetric]:
+    metrics: dict[str, NormalizedMetric] = {}
+    for name, value in diagnostics.items():
+        key = f"preflight_{name}"
+        if isinstance(value, int):
+            metrics[key] = IntegerMetric(kind="integer", value=str(value))
+        elif isinstance(value, float):
+            metrics[key] = DecimalMetric(kind="decimal", value=_canonical_decimal(value))
+        else:
+            metrics[key] = TextMetric(kind="text", value=value)
+    return metrics
+
+
 def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str, Any]:
     from estimator import LWE, NTRU, RC, SIS, Simulator  # type: ignore[import-not-found]
 
@@ -109,15 +190,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
     if isinstance(request.problem, LweProblem):
         from sage.all import oo  # type: ignore[import-not-found]
 
-        problem = request.problem
-        samples = oo if problem.samples.kind == "unlimited" else problem.samples.count
-        params = LWE.Parameters(
-            n=problem.dimension,
-            q=int(problem.modulus),
-            Xs=_distribution(problem.secret, problem.dimension),
-            Xe=_distribution(problem.error, None),
-            m=samples,
-        )
+        params = _lwe_parameters(request.problem)
         all_attacks = {PUBLIC_TO_UPSTREAM[item] for item in LWE_ATTACKS}
         return LWE.estimate(
             params,
@@ -171,6 +244,20 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
         )
 
     raise AssertionError("strict request model admitted an unknown problem")
+
+
+def _lwe_parameters(problem: LweProblem) -> Any:
+    from estimator import LWE  # type: ignore[import-not-found]
+    from sage.all import oo  # type: ignore[import-not-found]
+
+    samples = oo if problem.samples.kind == "unlimited" else problem.samples.count
+    return LWE.Parameters(
+        n=problem.dimension,
+        q=int(problem.modulus),
+        Xs=_distribution(problem.secret, problem.dimension),
+        Xe=_distribution(problem.error, None),
+        m=samples,
+    )
 
 
 def _distribution(distribution: Any, logical_length: int | None) -> Any:

@@ -59,6 +59,13 @@ def test_health_metadata_and_estimate_contracts() -> None:
         ]
         assert response.json()["provenance"]["estimator_commit"] == ESTIMATOR_COMMIT
 
+        source = request_data()
+        source["operation"] = "preflight"
+        source["target_attacks"] = ["arora_gb", "bkw"]
+        preflight = client.post("/v1/preflight", json=source)
+        assert preflight.status_code == 200, preflight.text
+        assert [item["attack"] for item in preflight.json()["results"]] == ["arora_gb", "bkw"]
+
 
 def test_validation_error_uses_worker_error_envelope() -> None:
     settings = Settings(process=ProcessSettings(command=mock_worker("success")))

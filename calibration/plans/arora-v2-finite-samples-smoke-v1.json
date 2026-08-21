@@ -1,0 +1,21 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-plan",
+  "version": 1,
+  "timeout_seconds": 600,
+  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "experiments": [
+    {
+      "attack": "arora_gb",
+      "axes": {
+        "dimension": [512],
+        "modulus": ["3329"],
+        "samples": [{ "kind": "finite", "count": 65536 }],
+        "secret": [
+          { "kind": "uniform_binary" },
+          { "kind": "uniform_ternary" }
+        ],
+        "error_standard_deviation": ["0.7", "1.2"]
+      }
+    }
+  ]
+}

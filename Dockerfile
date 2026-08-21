@@ -31,6 +31,8 @@ FROM base AS test
 USER root
 RUN sage -pip install --no-cache-dir httpx2==2.9.0 pytest==9.1.1
 COPY --chown=sage:sage tests/ /app/tests/
+COPY --chown=sage:sage tools/ /app/tools/
+COPY --chown=sage:sage calibration/ /app/calibration/
 COPY --chown=sage:sage pyproject.toml /app/pyproject.toml
 USER sage
 RUN sage -python -m pytest -p no:cacheprovider
