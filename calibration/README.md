@@ -58,8 +58,7 @@ each attack. Failed, timed-out, and non-finite pairs never justify skipping an
 attack.
 
 The current reviewed result is
-`calibration/baselines/slow-attacks-v2.json`; v1 is retained as history of the
-replaced approximation. Across 168 comparable Arora-GB observations, including
+`calibration/baselines/slow-attacks-v2.json`. Across 168 comparable Arora-GB observations, including
 an independent grid and small finite-sample/secret-diversity checks, the largest
 unsafe error was about `2e-12` bit (floating-point noise). An 8-bit cushion
 mathematically rounds to 9 bits, and production uses a 10-bit floor. The user

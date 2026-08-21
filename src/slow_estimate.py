@@ -450,11 +450,6 @@ def arora_gb_estimate(params: Any, omega: float = 2.0) -> SlowEstimate:
     )
 
 
-def arora_gb_log2_cost(params: Any, omega: float = 2.0) -> float:
-    """Return only the v2 Arora-GB log-cost for compatibility."""
-    return arora_gb_estimate(params, omega).log2_cost
-
-
 def bkw_log2_cost(params: Any) -> float:
     """Return the restored optimistic coded-BKW table-cost estimate."""
     normalized = params.normalize()
