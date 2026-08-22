@@ -1,6 +1,16 @@
-"""Thin adapter over the pinned lattice-estimator API.
+"""Boundary between the service protocol and estimation implementations.
 
-This module is imported only inside the killable Sage child process.
+This module is imported only inside the killable Sage child process.  There are
+two public execution paths:
+
+* :func:`execute` calls the installed ``lattice-estimator`` package for exact
+  attacks, then converts its unstable/raw output to the public response model.
+* :func:`execute_preflight` runs the service's fast Arora-GB and BKW screening
+  algorithms; it does not execute the corresponding upstream attacks.
+
+The direct upstream calls are centralized in :func:`_run_estimator`, while
+:func:`_lwe_parameters` and :func:`_distribution` translate public parameters to
+upstream Sage objects.
 """
 
 from __future__ import annotations
@@ -54,6 +64,8 @@ from .slow_estimate import (
     bkw_estimate,
 )
 
+# Keep upstream spellings at this boundary.  Public names remain stable even if
+# lattice-estimator changes display names or uses hyphens internally.
 PUBLIC_TO_UPSTREAM = {
     Attack.ARORA_GB: "arora-gb",
     Attack.BKW: "bkw",
@@ -73,7 +85,7 @@ NORMALIZATION_REAL_PRECISION_BITS = 256
 
 
 def execute(request: EstimateRequest) -> WorkerResponse:
-    """Run exactly the attacks requested by the Rust scheduler."""
+    """Run exact upstream attacks requested by the caller and normalize results."""
 
     started = time.monotonic()
     captured_stdout = io.StringIO()
@@ -125,7 +137,7 @@ def execute(request: EstimateRequest) -> WorkerResponse:
 
 
 def execute_preflight(request: PreflightRequest) -> WorkerResponse:
-    """Compute cheap attack-specific estimates in the Sage worker."""
+    """Run local fast screens that decide whether slow exact attacks are needed."""
     started = time.monotonic()
     params = _lwe_parameters(request.problem)
     normalized = params.normalize()
@@ -263,6 +275,7 @@ def _arora_alarm(seconds: float):
         return
 
     def deadline_exceeded(_signum: int, _frame: object) -> None:
+        """Turn SIGALRM into a scoped exception handled by the preflight path."""
         raise AroraScreenDeadline
 
     previous_handler = signal.getsignal(signal.SIGALRM)
@@ -278,6 +291,7 @@ def _arora_alarm(seconds: float):
 def _preflight_diagnostics(
     diagnostics: dict[str, int | float | str],
 ) -> dict[str, NormalizedMetric]:
+    """Prefix and normalize algorithm diagnostics for the public metrics map."""
     metrics: dict[str, NormalizedMetric] = {}
     for name, value in diagnostics.items():
         key = f"preflight_{name}"
@@ -291,6 +305,14 @@ def _preflight_diagnostics(
 
 
 def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str, Any]:
+    """Call the installed ``lattice-estimator`` package for an exact request.
+
+    This is the main upstream integration point.  Attack names, cost models,
+    problem parameters, and deny lists are translated here before dispatching to
+    ``LWE.estimate``, ``NTRU.estimate``, or ``SIS.estimate``.
+    """
+    # Import only inside the Sage worker: the HTTP process does not need Sage or
+    # lattice-estimator loaded and remains independently killable/responsive.
     from estimator import LWE, NTRU, RC, SIS, Simulator  # type: ignore[import-not-found]
 
     cost_model = getattr(RC, request.models.cost_model.value)
@@ -357,6 +379,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
 
 
 def _lwe_parameters(problem: LweProblem) -> Any:
+    """Translate the public LWE problem model to upstream ``LWE.Parameters``."""
     from estimator import LWE  # type: ignore[import-not-found]
     from sage.all import oo  # type: ignore[import-not-found]
 
@@ -371,6 +394,7 @@ def _lwe_parameters(problem: LweProblem) -> Any:
 
 
 def _distribution(distribution: Any, logical_length: int | None) -> Any:
+    """Translate a public distribution variant to an upstream ``estimator.ND`` object."""
     from estimator import ND  # type: ignore[import-not-found]
 
     if isinstance(distribution, UniformBinary):
@@ -408,6 +432,7 @@ def _normalize_attack(
     raw_results: dict[str, Any],
     audit: dict[str, Any],
 ) -> AttackExecution:
+    """Convert one upstream attack dictionary into a stable outcome variant."""
     upstream_name = PUBLIC_TO_UPSTREAM[attack]
     raw = raw_results.get(upstream_name)
     if raw is None:
@@ -450,6 +475,7 @@ def _normalize_attack(
 
 
 def _log2_cost(value: Any) -> str | None:
+    """Return canonical ``log2(rop)`` for a finite positive upstream cost."""
     if value is None:
         return None
     try:
@@ -472,6 +498,7 @@ def _log2_cost(value: Any) -> str | None:
 
 
 def _normalize_metric(value: Any) -> NormalizedMetric | None:
+    """Convert a supported scalar diagnostic to its tagged wire representation."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -488,6 +515,7 @@ def _normalize_metric(value: Any) -> NormalizedMetric | None:
 
 
 def _canonical_decimal(value: Any) -> str:
+    """Serialize a finite numeric value without exponent or insignificant zeros."""
     try:
         decimal = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError, OverflowError):
@@ -530,6 +558,7 @@ def _evaluate_numeric_expression(value: Any) -> Decimal:
 
 
 def _audit_capture(stdout: io.StringIO, stderr: io.StringIO) -> dict[str, Any]:
+    """Collect bounded non-empty upstream output for failure diagnostics."""
     result: dict[str, Any] = {}
     if stdout.getvalue():
         result["stdout"] = stdout.getvalue()[-16_384:]
@@ -539,6 +568,7 @@ def _audit_capture(stdout: io.StringIO, stderr: io.StringIO) -> dict[str, Any]:
 
 
 def _safe_text(value: Any) -> str:
+    """Render an upstream object while preventing broken ``str`` implementations."""
     try:
         return str(value)
     except Exception:  # noqa: BLE001 - audit normalization must not mask the primary error

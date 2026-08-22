@@ -9,12 +9,18 @@ from importlib.metadata import PackageNotFoundError, distribution
 
 ADAPTER_VERSION = "5"
 ADAPTER_SCHEMA_VERSION = 4
+
+# Runtime identity is reported in metadata and attached to every estimate so a
+# result can be traced back to the exact Sage environment that produced it.
 SAGE_VERSION = "10.9"
 SAGE_IMAGE = (
     "sagemath/sagemath@sha256:2401ffa8e9fc85c7ea17d3649bde5958b4dbf0858b3e504098c4102720151711"
 )
 
 REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024
+
+# Request timeouts belong to individual Sage processes.  Cleanup grace controls
+# how long SIGTERM may take before the entire process group receives SIGKILL.
 DEFAULT_TIMEOUT_SECONDS = 3_600
 MAX_TIMEOUT_SECONDS = 7_200
 DEFAULT_CLEANUP_GRACE_SECONDS = 15

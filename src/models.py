@@ -25,6 +25,8 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
 
+# Integers and decimals cross the JSON boundary as canonical strings.  This
+# avoids float rounding and language-specific limits for cryptographic values.
 CanonicalInteger: TypeAlias = Annotated[str, StringConstraints(pattern=r"^(0|[1-9][0-9]*)$")]
 CanonicalSignedInteger: TypeAlias = Annotated[
     str, StringConstraints(pattern=r"^(0|-?[1-9][0-9]*)$")
@@ -38,71 +40,96 @@ NonNegativeU64: TypeAlias = Annotated[int, Field(strict=True, ge=0, le=2**64 - 1
 
 
 class FiniteSampleCount(StrictModel):
+    """A caller-supplied finite number of available problem samples."""
+
     kind: Literal["finite"]
     count: PositiveU64
 
 
 class UnlimitedSampleCount(StrictModel):
+    """Request estimator semantics with no finite sample-count bound."""
+
     kind: Literal["unlimited"]
 
 
+# Tagged unions use ``kind`` as their JSON discriminator throughout the protocol.
 SampleCount: TypeAlias = Annotated[
     FiniteSampleCount | UnlimitedSampleCount, Field(discriminator="kind")
 ]
 
 
 class UniformBinary(StrictModel):
+    """Coefficient-wise uniform distribution over ``{0, 1}``."""
+
     kind: Literal["uniform_binary"]
 
 
 class UniformTernary(StrictModel):
+    """Coefficient-wise uniform distribution over ``{-1, 0, 1}``."""
+
     kind: Literal["uniform_ternary"]
 
 
 class SparseTernary(StrictModel):
+    """Probabilistic ternary distribution with probabilities 1/4, 1/2, 1/4."""
+
     kind: Literal["sparse_ternary"]
 
 
 class FixedWeightBinary(StrictModel):
+    """Binary secret with an exact Hamming weight."""
+
     kind: Literal["fixed_weight_binary"]
     hamming_weight: NonNegativeU64
 
 
 class FixedWeightTernary(StrictModel):
+    """Ternary secret with exact positive and negative coefficient counts."""
+
     kind: Literal["fixed_weight_ternary"]
     positive_weight: NonNegativeU64
     negative_weight: NonNegativeU64
 
 
 class DiscreteGaussian(StrictModel):
+    """Integer-valued centered discrete Gaussian distribution."""
+
     kind: Literal["discrete_gaussian"]
     standard_deviation: CanonicalDecimal
 
     @field_validator("standard_deviation")
     @classmethod
     def standard_deviation_is_positive(cls, value: str) -> str:
+        """Reject zero and negative Gaussian standard deviations."""
         if _decimal(value) <= 0:
             raise ValueError("standard_deviation must be positive")
         return value
 
 
 class CenteredBinomial(StrictModel):
+    """Centered binomial distribution parameterized by ``eta`` trials per side."""
+
     kind: Literal["centered_binomial"]
     eta: PositiveU64
 
 
 class UniformInteger(StrictModel):
+    """Coefficient-wise uniform distribution on an inclusive integer interval."""
+
     kind: Literal["uniform_integer"]
     lower: CanonicalSignedInteger
     upper: CanonicalSignedInteger
 
     @model_validator(mode="after")
     def bounds_are_ordered(self) -> UniformInteger:
+        """Require a non-empty inclusive interval."""
         if int(self.lower) > int(self.upper):
             raise ValueError("uniform lower bound must not exceed upper bound")
         return self
 
 
+# Secret distributions are broader than error distributions: fixed-weight and
+# sparse variants model structured secrets but are not accepted as LWE errors.
 SecretDistribution: TypeAlias = Annotated[
     UniformBinary
     | UniformTernary
@@ -121,6 +148,8 @@ ErrorDistribution: TypeAlias = Annotated[
 
 
 class LweProblem(StrictModel):
+    """Public LWE instance supplied to exact estimation or slow-attack preflight."""
+
     kind: Literal["lwe"]
     dimension: PositiveU64
     modulus: CanonicalInteger
@@ -130,12 +159,15 @@ class LweProblem(StrictModel):
 
     @model_validator(mode="after")
     def semantics_are_valid(self) -> LweProblem:
+        """Validate constraints that depend on multiple LWE fields."""
         _require_modulus(self.modulus)
         _require_secret_length(self.secret, self.dimension)
         return self
 
 
 class NtruStructure(str, Enum):
+    """Distinguish unstructured matrix NTRU from circulant polynomial NTRU."""
+
     MATRIX = "matrix"
     CIRCULANT = "circulant"
 
@@ -144,6 +176,8 @@ WireNtruStructure: TypeAlias = Annotated[NtruStructure, Field(strict=False)]
 
 
 class NtruProblem(StrictModel):
+    """Public NTRU instance, including its matrix or circulant structure."""
+
     kind: Literal["ntru"]
     dimension: PositiveU64
     modulus: CanonicalInteger
@@ -153,12 +187,15 @@ class NtruProblem(StrictModel):
 
     @model_validator(mode="after")
     def semantics_are_valid(self) -> NtruProblem:
+        """Validate modulus and fixed-weight secret constraints."""
         _require_modulus(self.modulus)
         _require_secret_length(self.secret, self.dimension)
         return self
 
 
 class SisNorm(str, Enum):
+    """Norm used to interpret an SIS solution-length bound."""
+
     L2 = "l2"
     L_INFINITY = "l_infinity"
 
@@ -167,6 +204,8 @@ WireSisNorm: TypeAlias = Annotated[SisNorm, Field(strict=False)]
 
 
 class SisProblem(StrictModel):
+    """Public SIS instance passed to the upstream SIS estimator."""
+
     kind: Literal["sis"]
     dimension: PositiveU64
     modulus: CanonicalInteger
@@ -176,27 +215,35 @@ class SisProblem(StrictModel):
 
     @model_validator(mode="after")
     def semantics_are_valid(self) -> SisProblem:
+        """Require a valid modulus and a positive solution-length bound."""
         _require_modulus(self.modulus)
         if _decimal(self.length_bound) <= 0:
             raise ValueError("SIS length_bound must be positive")
         return self
 
 
+# A request carries exactly one problem family selected by its ``kind`` field.
 EstimatorProblem: TypeAlias = Annotated[
     LweProblem | NtruProblem | SisProblem, Field(discriminator="kind")
 ]
 
 
 class CostModel(str, Enum):
+    """Supported lattice-reduction cost models exposed by the API."""
+
     BDGL16 = "BDGL16"
     LAA_MOS_POL14 = "LaaMosPol14"
 
 
 class ShapeModel(str, Enum):
+    """Supported Gram-Schmidt shape simulators exposed by the API."""
+
     GSA = "GSA"
 
 
 class Attack(str, Enum):
+    """Stable public attack identifiers independent of upstream display names."""
+
     ARORA_GB = "arora_gb"
     BKW = "bkw"
     USVP = "usvp"
@@ -209,6 +256,8 @@ class Attack(str, Enum):
     LATTICE = "lattice"
 
 
+# These tuples define both validation and canonical response order.  Their order
+# must stay stable because the parent verifies worker coverage positionally.
 LWE_ATTACKS = (
     Attack.ARORA_GB,
     Attack.BKW,
@@ -248,11 +297,15 @@ WireAttack: TypeAlias = Annotated[Attack, Field(strict=False)]
 
 
 class EstimatorModels(StrictModel):
+    """Cost and basis-shape assumptions shared by all requested attacks."""
+
     cost_model: WireCostModel
     shape_model: WireShapeModel
 
 
 class EstimateRequest(StrictModel):
+    """One exact-estimation request sent from HTTP to a Sage worker."""
+
     schema_version: Literal[ADAPTER_SCHEMA_VERSION] = ADAPTER_SCHEMA_VERSION
     problem: EstimatorProblem
     models: EstimatorModels
@@ -263,6 +316,7 @@ class EstimateRequest(StrictModel):
 
     @model_validator(mode="after")
     def attacks_are_unique_and_supported(self) -> EstimateRequest:
+        """Reject duplicates and attacks unsupported by the selected problem kind."""
         if len(set(self.target_attacks)) != len(self.target_attacks):
             raise ValueError("target_attacks must not contain duplicates")
         allowed = attacks_for_problem(self.problem)
@@ -285,6 +339,7 @@ class PreflightRequest(EstimateRequest):
     @field_validator("required_security_bits")
     @classmethod
     def required_security_is_positive(cls, value: str) -> str:
+        """Require a positive target for threshold-based scheduling."""
         if _decimal(value) <= 0:
             raise ValueError("required_security_bits must be positive")
         return value
@@ -295,12 +350,14 @@ class PreflightRequest(EstimateRequest):
     )
     @classmethod
     def requested_margin_is_non_negative(cls, value: str) -> str:
+        """Allow callers to increase, but never invert, calibrated margins."""
         if _decimal(value) < 0:
             raise ValueError("requested Arora-GB margins must be non-negative")
         return value
 
     @model_validator(mode="after")
     def only_slow_lwe_attacks_are_allowed(self) -> PreflightRequest:
+        """Restrict preflight to the two supported slow LWE attacks."""
         if not isinstance(self.problem, LweProblem):
             raise ValueError("preflight is only available for LWE")
         unsupported = [
@@ -312,25 +369,35 @@ class PreflightRequest(EstimateRequest):
 
 
 class IntegerMetric(StrictModel):
+    """Normalized integer-valued diagnostic safe for JSON transport."""
+
     kind: Literal["integer"]
     value: CanonicalSignedInteger
 
 
 class DecimalMetric(StrictModel):
+    """Normalized finite decimal diagnostic encoded canonically as text."""
+
     kind: Literal["decimal"]
     value: CanonicalDecimal
 
 
 class BooleanMetric(StrictModel):
+    """Normalized Boolean diagnostic emitted by an attack adapter."""
+
     kind: Literal["boolean"]
     value: bool
 
 
 class TextMetric(StrictModel):
+    """Normalized textual diagnostic emitted by an attack adapter."""
+
     kind: Literal["text"]
     value: str
 
 
+# Raw Sage objects never cross the process boundary; only these scalar metric
+# variants are retained for audit and UI diagnostics.
 NormalizedMetric: TypeAlias = Annotated[
     IntegerMetric | DecimalMetric | BooleanMetric | TextMetric,
     Field(discriminator="kind"),
@@ -338,12 +405,16 @@ NormalizedMetric: TypeAlias = Annotated[
 
 
 class ComputedOutcome(StrictModel):
+    """A finite attack cost that may contribute to the final security minimum."""
+
     kind: Literal["computed"]
     security_bits: CanonicalDecimal
     metrics: dict[str, NormalizedMetric] = Field(default_factory=dict)
 
 
 class UnsupportedOutcome(StrictModel):
+    """The requested attack is not implemented for the supplied parameter domain."""
+
     kind: Literal["unsupported"]
     code: str
     reason: str
@@ -351,6 +422,8 @@ class UnsupportedOutcome(StrictModel):
 
 
 class NoFiniteEstimateOutcome(StrictModel):
+    """The exact estimator completed but found no finite positive attack cost."""
+
     kind: Literal["no_finite_estimate"]
     code: str
     reason: str
@@ -382,6 +455,8 @@ class ThresholdScreenOutcome(StrictModel):
 
 
 class FailedOutcome(StrictModel):
+    """An attack or adapter failed before producing a usable conclusion."""
+
     kind: Literal["failed"]
     code: str
     message: str
@@ -389,6 +464,8 @@ class FailedOutcome(StrictModel):
     raw_result: JsonValue | None = None
 
 
+# Every attack has exactly one tagged terminal/preflight outcome.  In particular,
+# a threshold screen is scheduling evidence rather than a computed security bit.
 WorkerOutcome: TypeAlias = Annotated[
     ComputedOutcome
     | NoFiniteEstimateOutcome
@@ -401,6 +478,8 @@ WorkerOutcome: TypeAlias = Annotated[
 
 
 class AttackExecution(StrictModel):
+    """One attack outcome plus timing ownership for an exact or preflight request."""
+
     attack: Attack
     outcome: WorkerOutcome
     duration_ms: NonNegativeU64 = 0
@@ -409,6 +488,8 @@ class AttackExecution(StrictModel):
 
 
 class EstimatorProvenance(StrictModel):
+    """Pinned implementation versions needed to audit an estimate."""
+
     estimator_commit: str
     sage_version: str
     adapter_version: str
@@ -417,6 +498,8 @@ class EstimatorProvenance(StrictModel):
 
 
 class EstimateResponse(StrictModel):
+    """Public HTTP response containing attack results and build provenance."""
+
     schema_version: Literal[ADAPTER_SCHEMA_VERSION] = ADAPTER_SCHEMA_VERSION
     results: list[AttackExecution]
     duration_ms: NonNegativeU64
@@ -424,23 +507,31 @@ class EstimateResponse(StrictModel):
 
 
 class WorkerResponse(StrictModel):
+    """Internal child-process response before HTTP provenance is attached."""
+
     schema_version: Literal[ADAPTER_SCHEMA_VERSION] = ADAPTER_SCHEMA_VERSION
     results: list[AttackExecution]
     duration_ms: NonNegativeU64
 
 
 class HealthResponse(StrictModel):
+    """Minimal response used by container and orchestration health checks."""
+
     status: Literal["ok"] = "ok"
     adapter_version: str
 
 
 class SupportMatrixEntry(StrictModel):
+    """Supported attacks and distributions for one public problem kind."""
+
     attacks: list[Attack]
     distributions: list[str]
     notes: list[str] = Field(default_factory=list)
 
 
 class MetadataResponse(StrictModel):
+    """Service versions and capabilities returned by ``GET /v1/metadata``."""
+
     adapter_version: str
     adapter_schema_version: PositiveU64
     estimator_commit: str
@@ -452,6 +543,8 @@ class MetadataResponse(StrictModel):
 
 
 class ErrorEnvelope(StrictModel):
+    """Stable JSON shape used for validation, worker, and server errors."""
+
     code: str
     message: str
     path: str | None = None
@@ -459,10 +552,12 @@ class ErrorEnvelope(StrictModel):
 
 
 def attacks_for_problem(problem: EstimatorProblem) -> tuple[Attack, ...]:
+    """Return attacks allowed by the strict model for a problem variant."""
     return ATTACKS_BY_PROBLEM[problem.kind]
 
 
 def _decimal(value: str) -> Decimal:
+    """Parse a canonical decimal string and reject infinities and NaN."""
     try:
         parsed = Decimal(value)
     except InvalidOperation as error:
@@ -473,11 +568,13 @@ def _decimal(value: str) -> Decimal:
 
 
 def _require_modulus(value: str) -> None:
+    """Enforce the common cryptographic modulus lower bound."""
     if int(value) <= 1:
         raise ValueError("modulus must be greater than one")
 
 
 def _require_secret_length(secret: SecretDistribution, logical_length: int) -> None:
+    """Ensure fixed secret weights fit within the logical secret length."""
     if isinstance(secret, FixedWeightBinary) and secret.hamming_weight > logical_length:
         raise ValueError("fixed binary weight exceeds logical secret length")
     if (

@@ -14,6 +14,9 @@ from typing import Any
 
 ARORA_GB_PREFLIGHT_RULE_VERSION = 6
 BKW_PREFLIGHT_RULE_VERSION = 5
+
+# Arora v6 is a target-aware scheduling screen.  A tier may approve skipping an
+# exact attack only after its reviewed candidate set finishes within the budget.
 ARORA_COARSE_MARGIN_FLOOR_BITS = 64.0
 ARORA_REFINED_MARGIN_FLOOR_BITS = 10.0
 ARORA_COARSE_BUDGET_SECONDS = 1.0
@@ -50,6 +53,8 @@ class AroraScreenDeadline(TimeoutError):
 
 @dataclass
 class _AroraScreenWork:
+    """Mutable per-request deadline, counters, and memoized Arora subproblems."""
+
     deadline: float
     candidates_checked: int = 0
     candidates_pruned: int = 0
@@ -60,12 +65,15 @@ class _AroraScreenWork:
     )
 
     def check_deadline(self) -> None:
+        """Abort cooperatively once the current screening tier exhausts its budget."""
         if time.monotonic() >= self.deadline:
             raise AroraScreenDeadline
 
 
 @dataclass(frozen=True)
 class _AroraCoreEstimate:
+    """Finite Gaussian Arora core cost before or after secret guessing."""
+
     log2_cost: float
     degree: int
     tail: int
@@ -74,6 +82,8 @@ class _AroraCoreEstimate:
 
 @dataclass(frozen=True)
 class _AroraBoundedEstimate:
+    """Finite bounded-error Arora cost with guessing-composition details."""
+
     log2_cost: float
     degree: int
     error_degree: int
@@ -84,6 +94,8 @@ class _AroraBoundedEstimate:
 
 @dataclass(frozen=True)
 class _BkwEstimate:
+    """One coded-BKW parameter choice and its logarithmic resource costs."""
+
     log2_cost: float
     log2_samples: float
     b: int
@@ -96,6 +108,7 @@ class _BkwEstimate:
 
 
 def _finite_float(value: Any) -> float | None:
+    """Convert a Sage/Python numeric object to a finite float when possible."""
     try:
         result = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -104,6 +117,7 @@ def _finite_float(value: Any) -> float | None:
 
 
 def _is_infinite(value: Any) -> bool:
+    """Recognize both Python and Sage representations of positive infinity."""
     try:
         return math.isinf(float(value))
     except (TypeError, ValueError, OverflowError):
@@ -111,6 +125,7 @@ def _is_infinite(value: Any) -> bool:
 
 
 def _log2_int_like(value: Any) -> float:
+    """Return the base-two logarithm of a positive integer-like value."""
     if _is_infinite(value):
         return math.inf
     try:
@@ -123,6 +138,7 @@ def _log2_int_like(value: Any) -> float:
 
 
 def _bounds_width(distribution: Any) -> int | None:
+    """Return the inclusive support width of a bounded upstream distribution."""
     if not bool(getattr(distribution, "is_bounded", False)):
         return None
     bounds = getattr(distribution, "bounds", None)
@@ -137,12 +153,14 @@ def _bounds_width(distribution: Any) -> int | None:
 
 
 def _log2_binomial(n: int, k: int) -> float:
+    """Approximate ``log2(binomial(n, k))`` without constructing the integer."""
     if k < 0 or k > n:
         return math.inf
     return (math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)) / math.log(2)
 
 
 def _log2_monomials(num_vars: int, degree: int) -> float:
+    """Return the log count of monomials up to ``degree`` in ``num_vars`` variables."""
     return _log2_binomial(num_vars + degree, degree)
 
 
@@ -202,6 +220,7 @@ def _threshold_degree_limit(num_vars: int, remaining_bits: float, omega: float) 
 
 
 def _screen_grid(stop: int, points: int) -> tuple[int, ...]:
+    """Build a deterministic, evenly spaced integer grid including both endpoints."""
     if stop <= 0:
         return (0,)
     count = min(stop + 1, points)
@@ -209,6 +228,7 @@ def _screen_grid(stop: int, points: int) -> tuple[int, ...]:
 
 
 def _screen_tail_grid(sigma: float, refined: bool) -> tuple[int, ...]:
+    """Choose coarse or exhaustive Gaussian tail candidates in the reviewed domain."""
     start = max(1, math.ceil(sigma))
     stop = ARORA_GAUSSIAN_MAX_TAIL_SEARCH
     if start > stop:
@@ -251,6 +271,7 @@ def _screen_hilbert_candidate(
 
 
 def _screen_repetition(params: Any, zeta: int) -> float | None:
+    """Estimate log guessing repetitions after eliminating ``zeta`` secret entries."""
     n = int(params.n)
     if bool(getattr(params.Xs, "is_sparse", False)):
         h = int(getattr(params.Xs, "hamming_weight", 0))
@@ -265,6 +286,7 @@ def _screen_repetition(params: Any, zeta: int) -> float | None:
 
 
 def _screen_zeta_grid(params: Any, threshold_bits: float, refined: bool) -> tuple[int, ...]:
+    """Choose secret-guessing dimensions whose repetition cost can matter."""
     n = int(params.n)
     if bool(getattr(params.Xs, "is_sparse", False)):
         stop = max(0, n - 40)
@@ -424,6 +446,7 @@ def arora_gb_threshold_screen(
 
 
 def _screen_diagnostics(work: _AroraScreenWork) -> dict[str, int | float | str]:
+    """Expose bounded-search coverage and cache use for scheduling audits."""
     return {
         "model": "arora_gb_target_screen",
         "candidates_checked": work.candidates_checked,
@@ -435,6 +458,7 @@ def _screen_diagnostics(work: _AroraScreenWork) -> dict[str, int | float | str]:
 
 
 def _secret_equations(params: Any, dimension: int | None = None) -> tuple[tuple[int, int], ...]:
+    """Model algebraic equations contributed by a sufficiently small secret."""
     dimension = int(params.n) if dimension is None else dimension
     try:
         if params.Xs > params.Xe:
@@ -452,6 +476,7 @@ def _secret_equations(params: Any, dimension: int | None = None) -> tuple[tuple[
 
 
 def _arora_bounded_core(params: Any, omega: float, dimension: int) -> _AroraBoundedEstimate | None:
+    """Estimate a bounded-error Arora system at one reduced dimension."""
     if dimension <= 0:
         return None
     reduced = params if dimension == int(params.n) else params.updated(n=dimension).normalize()
@@ -511,6 +536,7 @@ def _gaussian_tail_sample_count(sigma_value: Any, tail: int) -> int:
 
 
 def _arora_gaussian_core(params: Any, omega: float, n: int) -> _AroraCoreEstimate | None:
+    """Search Gaussian tail cuts for the cheapest finite Arora algebraic system."""
     sigma_value = getattr(params.Xe, "stddev", None)
     sigma = _finite_float(sigma_value)
     if sigma is None or sigma <= 0:
@@ -548,18 +574,21 @@ def _arora_gaussian_core(params: Any, omega: float, n: int) -> _AroraCoreEstimat
 
 
 def _dense_guess_base(params: Any) -> int | None:
+    """Return the per-coordinate search base for a dense bounded secret."""
     if bool(getattr(params.Xs, "is_sparse", False)):
         return None
     return _bounds_width(params.Xs)
 
 
 def _log_combination(n: int, k: int) -> float:
+    """Return the natural logarithm of a binomial coefficient."""
     if k < 0 or k > n:
         return -math.inf
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
 
 def _log_add(left: float, right: float) -> float:
+    """Add two positive quantities represented by natural logarithms."""
     if left == -math.inf:
         return right
     if right == -math.inf:
@@ -605,6 +634,7 @@ def _composition_cost(
     zeta: int,
     base: int,
 ) -> _AroraCoreEstimate | None:
+    """Recompute Gaussian algebraic cost after guessing dense coordinates."""
     n = int(params.n) - zeta
     if n <= 0:
         return None
@@ -637,6 +667,7 @@ def _arora_dense_guessing(
     cache: dict[int, _AroraCoreEstimate | None] = {0: core}
 
     def evaluate(zeta: int) -> _AroraCoreEstimate | None:
+        """Memoize one dense-secret guessing candidate."""
         zeta = max(0, min(max_zeta, zeta))
         if zeta not in cache:
             cache[zeta] = _composition_cost(params, core, omega, zeta, base)
@@ -688,6 +719,7 @@ def _arora_sparse_guessing(params: Any, omega: float) -> tuple[_AroraCoreEstimat
     cache: dict[int, _AroraCoreEstimate | None] = {0: baseline}
 
     def evaluate(zeta: int) -> _AroraCoreEstimate | None:
+        """Memoize one sparse-secret guessing candidate including repetitions."""
         zeta = max(0, min(max_zeta, zeta))
         if zeta not in cache:
             core = _arora_gaussian_core(params, omega, n - zeta)
@@ -747,6 +779,7 @@ def _arora_bounded_guessing(
         composition = "sparse_guessing"
 
         def repetition(zeta: int) -> float:
+            """Return sparse-secret repetition cost for one guessed dimension."""
             return _sparse_repetition_log2(n, h, zeta, base)
 
     else:
@@ -758,6 +791,7 @@ def _arora_bounded_guessing(
         composition = "dense_guessing"
 
         def repetition(zeta: int) -> float:
+            """Return dense-secret exhaustive guessing cost."""
             return zeta * math.log2(base)
 
     if stop <= 1:
@@ -783,6 +817,7 @@ def _arora_bounded_composition(
     zeta: int,
     repetition: Any,
 ) -> _AroraBoundedEstimate | None:
+    """Combine a reduced bounded core with its secret-guessing repetition cost."""
     core = _arora_bounded_core(params, omega, original_dimension - zeta)
     if core is None:
         return None
@@ -845,6 +880,7 @@ def arora_gb_estimate(params: Any, omega: float = 2.0) -> SlowEstimate:
 
 
 def _log2_add(*values: float) -> float:
+    """Add non-negative quantities represented in base-two logarithmic space."""
     finite = [value for value in values if value != -math.inf]
     if not finite:
         return -math.inf
@@ -855,6 +891,7 @@ def _log2_add(*values: float) -> float:
 
 
 def _log2_positive_difference(log2_left: float, right: int) -> float:
+    """Compute ``log2(2**log2_left - right)`` stably when the difference is positive."""
     if right <= 0:
         return log2_left
     log2_right = math.log2(right)
@@ -867,6 +904,7 @@ def _log2_positive_difference(log2_left: float, right: int) -> float:
 
 
 def _bkw_q_minus_one_log2(b: int, log2_q: float) -> float:
+    """Compute ``log2(q**b - 1)`` without constructing the large table size."""
     exponent = b * log2_q
     if exponent > 54:
         return exponent
@@ -874,6 +912,7 @@ def _bkw_q_minus_one_log2(b: int, log2_q: float) -> float:
 
 
 def _bkw_n(i: int, ell: int, ntest: int, b: int, log2_q: float) -> int:
+    """Return coded coordinates assigned to BKW reduction level ``i``."""
     if ntest <= 0:
         return 0
     denominator = ell / ntest + i / (2 * log2_q)
@@ -881,11 +920,13 @@ def _bkw_n(i: int, ell: int, ntest: int, b: int, log2_q: float) -> int:
 
 
 def _bkw_ntest(n: int, ell: int, t1: int, t2: int, b: int, log2_q: float) -> int:
+    """Find a near-root allocation for hypothesis-testing coordinates."""
     if t1 * b >= n:
         return 0
     upper = n - t1 * b
 
     def residual(ntest: int) -> int:
+        """Measure unallocated coordinates for a proposed test dimension."""
         ncod = sum(_bkw_n(i, ell, ntest, b, log2_q) for i in range(1, t2 + 1))
         return n - ncod - ntest - t1 * b
 
@@ -901,12 +942,14 @@ def _bkw_ntest(n: int, ell: int, t1: int, t2: int, b: int, log2_q: float) -> int
 
 
 def _bkw_t1(n: int, ell: int, total_t2: int, b: int, log2_q: float) -> int:
+    """Split total reduction stages into plain BKW and coded-BKW stages."""
     ntest = _bkw_ntest(n, ell, 0, total_t2, b, log2_q)
     result = sum(_bkw_n(i, ell, ntest, b, log2_q) <= b for i in range(1, total_t2 + 1))
     return min(result, n // b)
 
 
 def _bkw_amplification_log2(log2_variance: float, log2_q: float) -> float:
+    """Estimate samples needed to amplify the final distinguisher advantage."""
     log2_sigma_over_q = 0.5 * log2_variance + 0.5 * math.log2(2 * math.pi) - log2_q
     if log2_sigma_over_q > 4:
         return math.inf
@@ -991,6 +1034,7 @@ def _bkw_cost(
     total_t2: int,
     b: int,
 ) -> _BkwEstimate | None:
+    """Evaluate one coded-BKW block size and stage-count configuration."""
     log2_q = math.log2(q)
     ell = b - 1
     t1 = _bkw_t1(n, ell, total_t2, b, log2_q)
@@ -1021,6 +1065,7 @@ def _bkw_cost(
     log2_qb_minus_one = _bkw_q_minus_one_log2(b, log2_q)
 
     def log2_m_plus_tables(table_count: int) -> float:
+        """Combine distinguishing samples with accumulated BKW table entries."""
         table_term = (
             math.log2(table_count) + log2_qb_minus_one - 1 if table_count > 0 else -math.inf
         )
@@ -1099,15 +1144,18 @@ def bkw_estimate(params: Any) -> SlowEstimate:
         return SlowEstimate(math.inf, {"model": "coded_bkw_structural"})
 
     def search(error_stddev: float, available_log2_samples: float) -> _BkwEstimate | None:
+        """Search block sizes and stages for one effective error width."""
         secret_larger = secret_stddev > error_stddev
 
         def better(current: _BkwEstimate, incumbent: _BkwEstimate) -> bool:
+            """Prefer cheaper candidates without regressing past sample capacity."""
             sample_regression = (
                 incumbent.log2_samples <= available_log2_samples < current.log2_samples
             )
             return current.log2_cost <= incumbent.log2_cost and not sample_regression
 
         def evaluate_b(b: int) -> _BkwEstimate | None:
+            """Optimize the stage split for one BKW block size."""
             return _local_minimum(
                 2,
                 max(3, n // b),

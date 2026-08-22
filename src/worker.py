@@ -1,4 +1,9 @@
-"""JSON stdin/stdout entry point executed by ``sage -python``."""
+"""Sage child-process entry point: ``sage -python -m src.worker``.
+
+The parent process in :mod:`src.process` sends one JSON request on stdin.  This
+module validates it, chooses the exact or preflight adapter path, and writes one
+JSON response to stdout before exiting.  It deliberately contains no HTTP code.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,12 @@ from .models import EstimateRequest, PreflightRequest
 
 
 def main() -> int:
+    """Dispatch one internal worker request and exit after writing its response."""
     source = sys.stdin.buffer.read()
     try:
         raw = json.loads(source)
+        # Preflight is an explicit operation because it runs local fast screens.
+        # Normal estimate requests call the installed lattice-estimator package.
         if raw.get("operation") == "preflight":
             request = PreflightRequest.model_validate(raw)
             response = execute_preflight(request)
