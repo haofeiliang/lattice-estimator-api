@@ -8,6 +8,8 @@ from __future__ import annotations
 import contextlib
 import io
 import math
+import signal
+import threading
 import time
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -37,14 +39,18 @@ from .models import (
     SisProblem,
     SparseTernary,
     TextMetric,
+    ThresholdScreenOutcome,
     UniformBinary,
     UniformInteger,
     UniformTernary,
     WorkerResponse,
 )
 from .slow_estimate import (
-    SLOW_ESTIMATE_RULE_VERSION,
-    arora_gb_estimate,
+    ARORA_GB_PREFLIGHT_RULE_VERSION,
+    ARORA_TOTAL_BUDGET_SECONDS,
+    BKW_PREFLIGHT_RULE_VERSION,
+    AroraScreenDeadline,
+    arora_gb_threshold_screen,
     bkw_estimate,
 )
 
@@ -100,9 +106,21 @@ def execute(request: EstimateRequest) -> WorkerResponse:
             _normalize_attack(attack, raw_results, audit) for attack in request.target_attacks
         ]
 
+    duration_ms = max(0, round((time.monotonic() - started) * 1_000))
+    duration_scope = "attack" if len(request.target_attacks) == 1 else "request_group"
+    shared_attacks = [] if duration_scope == "attack" else request.target_attacks
     return WorkerResponse(
-        results=results,
-        duration_ms=max(0, round((time.monotonic() - started) * 1_000)),
+        results=[
+            result.model_copy(
+                update={
+                    "duration_ms": duration_ms,
+                    "duration_scope": duration_scope,
+                    "shared_attacks": shared_attacks,
+                }
+            )
+            for result in results
+        ],
+        duration_ms=duration_ms,
     )
 
 
@@ -118,10 +136,7 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
         "secret": str(normalized.Xs),
         "error": str(normalized.Xe),
     }
-    preflight_metrics: dict[str, NormalizedMetric] = {
-        "preflight_rule_version": IntegerMetric(
-            kind="integer", value=str(SLOW_ESTIMATE_RULE_VERSION)
-        ),
+    normalized_metrics: dict[str, NormalizedMetric] = {
         "normalized_dimension": IntegerMetric(kind="integer", value=str(normalized.n)),
         "normalized_modulus": IntegerMetric(kind="integer", value=str(normalized.q)),
         "normalized_samples": TextMetric(kind="text", value=str(normalized.m)),
@@ -130,9 +145,83 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
     }
     results: list[AttackExecution] = []
     for attack in request.target_attacks:
-        estimate = arora_gb_estimate(params) if attack is Attack.ARORA_GB else bkw_estimate(params)
+        attack_started = time.monotonic()
+        if attack is Attack.ARORA_GB:
+            metrics = {
+                **normalized_metrics,
+                "preflight_rule_version": IntegerMetric(
+                    kind="integer", value=str(ARORA_GB_PREFLIGHT_RULE_VERSION)
+                ),
+            }
+            try:
+                with _arora_alarm(ARORA_TOTAL_BUDGET_SECONDS):
+                    screen = arora_gb_threshold_screen(
+                        params,
+                        float(request.required_security_bits),
+                        float(request.requested_arora_gb_coarse_margin_bits),
+                        float(request.requested_arora_gb_refined_margin_bits),
+                        started=attack_started,
+                    )
+            except AroraScreenDeadline:
+                screen = None
+            if screen is None:
+                outcome = ThresholdScreenOutcome(
+                    kind="threshold_screen",
+                    decision="needs_exact",
+                    precision_tier="refined",
+                    required_security_bits=request.required_security_bits,
+                    requested_margin_bits=request.requested_arora_gb_refined_margin_bits,
+                    calibrated_margin_floor_bits="10",
+                    effective_margin_bits=_canonical_decimal(
+                        max(float(request.requested_arora_gb_refined_margin_bits), 10.0)
+                    ),
+                    decision_threshold_bits=_canonical_decimal(
+                        float(request.required_security_bits)
+                        + max(float(request.requested_arora_gb_refined_margin_bits), 10.0)
+                    ),
+                    reason="time_budget_exhausted",
+                    metrics=metrics,
+                )
+            else:
+                outcome = ThresholdScreenOutcome(
+                    kind="threshold_screen",
+                    decision=screen.decision,
+                    precision_tier=screen.precision_tier,
+                    required_security_bits=request.required_security_bits,
+                    requested_margin_bits=(
+                        request.requested_arora_gb_coarse_margin_bits
+                        if screen.precision_tier == "coarse"
+                        else request.requested_arora_gb_refined_margin_bits
+                    ),
+                    calibrated_margin_floor_bits=_canonical_decimal(
+                        screen.calibrated_margin_floor_bits
+                    ),
+                    effective_margin_bits=_canonical_decimal(screen.effective_margin_bits),
+                    decision_threshold_bits=_canonical_decimal(screen.decision_threshold_bits),
+                    reason=screen.reason,
+                    metrics={
+                        **metrics,
+                        **_preflight_diagnostics(screen.diagnostics),
+                    },
+                )
+            results.append(
+                AttackExecution(
+                    attack=attack,
+                    outcome=outcome,
+                    duration_ms=max(0, round((time.monotonic() - attack_started) * 1_000)),
+                )
+            )
+            continue
+
+        estimate = bkw_estimate(params)
         if math.isfinite(estimate.log2_cost):
-            metrics = {**preflight_metrics, **_preflight_diagnostics(estimate.diagnostics)}
+            metrics = {
+                **normalized_metrics,
+                "preflight_rule_version": IntegerMetric(
+                    kind="integer", value=str(BKW_PREFLIGHT_RULE_VERSION)
+                ),
+                **_preflight_diagnostics(estimate.diagnostics),
+            }
             results.append(
                 AttackExecution(
                     attack=attack,
@@ -141,6 +230,7 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
                         security_bits=_canonical_decimal(estimate.log2_cost),
                         metrics=metrics,
                     ),
+                    duration_ms=max(0, round((time.monotonic() - attack_started) * 1_000)),
                 )
             )
         else:
@@ -156,12 +246,33 @@ def execute_preflight(request: PreflightRequest) -> WorkerResponse:
                         ),
                         raw_result=normalized_audit,
                     ),
+                    duration_ms=max(0, round((time.monotonic() - attack_started) * 1_000)),
                 )
             )
     return WorkerResponse(
         results=results,
         duration_ms=max(0, round((time.monotonic() - started) * 1_000)),
     )
+
+
+@contextlib.contextmanager
+def _arora_alarm(seconds: float):
+    """Interrupt one Arora screen without aborting later attacks in the worker."""
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def deadline_exceeded(_signum: int, _frame: object) -> None:
+        raise AroraScreenDeadline
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, deadline_exceeded)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 def _preflight_diagnostics(

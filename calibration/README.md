@@ -72,7 +72,7 @@ the largest observed positive error plus the requested cushion, separately for
 each attack. Failed, timed-out, and non-finite pairs never justify skipping an
 attack.
 
-The current reviewed result is
+The numeric rule-v5 baseline is
 `calibration/baselines/slow-attacks-v5.json`. Rule v5 composes the bounded core
 with the pinned estimator's dense or sparse secret guessing. It reproduces the
 former 88.170-bit failure to about `1.4e-13` bit and selects the same `zeta=65`,
@@ -95,3 +95,14 @@ finite-sample observations; their worst unsafe errors were 0.369 bit and
 samples. Other bounded errors and every `preflight_unknown` result run exact
 BKW. Exact BKW reached 7.863 seconds at n=2048/4096, while the preflight
 requests took at most 1.688 seconds in that holdout.
+
+Arora-GB rule v6 is recorded in
+`calibration/baselines/slow-attacks-v6.json`. It is a target-aware screen rather
+than a numeric security estimate. The development replay used 120 finite exact
+results at 19 targets around 128, 192, and 256 bit; the independent holdout used
+87 finite exact results. A 55-bit coarse floor still produced four unsafe skips,
+while 56 bit produced none, so the 8-bit cushion selects a 64-bit production
+floor. The refined tier had no unsafe skip at zero margin and therefore uses the
+minimum 10-bit production floor. Both production floors had zero unsafe skips
+on development and holdout. Use `validate-arora-v6-local` under Sage to repeat
+the threshold replay without rerunning exact attacks.

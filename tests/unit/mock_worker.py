@@ -46,6 +46,9 @@ def main() -> int:
             AttackExecution(
                 attack=attack,
                 outcome=ComputedOutcome(kind="computed", security_bits="128", metrics={}),
+                duration_ms=1,
+                duration_scope="attack" if len(request.target_attacks) == 1 else "request_group",
+                shared_attacks=[] if len(request.target_attacks) == 1 else request.target_attacks,
             )
             for attack in request.target_attacks
         ],

@@ -61,6 +61,9 @@ def test_health_metadata_and_estimate_contracts() -> None:
 
         source = request_data()
         source["operation"] = "preflight"
+        source["required_security_bits"] = "128"
+        source["requested_arora_gb_coarse_margin_bits"] = "64"
+        source["requested_arora_gb_refined_margin_bits"] = "10"
         source["target_attacks"] = ["arora_gb", "bkw"]
         preflight = client.post("/v1/preflight", json=source)
         assert preflight.status_code == 200, preflight.text

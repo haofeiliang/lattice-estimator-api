@@ -278,6 +278,26 @@ class PreflightRequest(EstimateRequest):
     """Request attack-specific cheap estimates without running the attacks."""
 
     operation: Literal["preflight"] = "preflight"
+    required_security_bits: CanonicalDecimal
+    requested_arora_gb_coarse_margin_bits: CanonicalDecimal
+    requested_arora_gb_refined_margin_bits: CanonicalDecimal
+
+    @field_validator("required_security_bits")
+    @classmethod
+    def required_security_is_positive(cls, value: str) -> str:
+        if _decimal(value) <= 0:
+            raise ValueError("required_security_bits must be positive")
+        return value
+
+    @field_validator(
+        "requested_arora_gb_coarse_margin_bits",
+        "requested_arora_gb_refined_margin_bits",
+    )
+    @classmethod
+    def requested_margin_is_non_negative(cls, value: str) -> str:
+        if _decimal(value) < 0:
+            raise ValueError("requested Arora-GB margins must be non-negative")
+        return value
 
     @model_validator(mode="after")
     def only_slow_lwe_attacks_are_allowed(self) -> PreflightRequest:
@@ -346,6 +366,21 @@ class PreflightUnknownOutcome(StrictModel):
     raw_result: JsonValue | None = None
 
 
+class ThresholdScreenOutcome(StrictModel):
+    """A target-aware Arora-GB scheduling decision, never a security result."""
+
+    kind: Literal["threshold_screen"]
+    decision: Literal["above_threshold", "needs_exact"]
+    precision_tier: Literal["coarse", "refined"]
+    required_security_bits: CanonicalDecimal
+    requested_margin_bits: CanonicalDecimal
+    calibrated_margin_floor_bits: CanonicalDecimal
+    effective_margin_bits: CanonicalDecimal
+    decision_threshold_bits: CanonicalDecimal
+    reason: str
+    metrics: dict[str, NormalizedMetric] = Field(default_factory=dict)
+
+
 class FailedOutcome(StrictModel):
     kind: Literal["failed"]
     code: str
@@ -358,6 +393,7 @@ WorkerOutcome: TypeAlias = Annotated[
     ComputedOutcome
     | NoFiniteEstimateOutcome
     | PreflightUnknownOutcome
+    | ThresholdScreenOutcome
     | UnsupportedOutcome
     | FailedOutcome,
     Field(discriminator="kind"),
@@ -367,6 +403,9 @@ WorkerOutcome: TypeAlias = Annotated[
 class AttackExecution(StrictModel):
     attack: Attack
     outcome: WorkerOutcome
+    duration_ms: NonNegativeU64 = 0
+    duration_scope: Literal["attack", "request_group"] = "attack"
+    shared_attacks: list[Attack] = Field(default_factory=list)
 
 
 class EstimatorProvenance(StrictModel):

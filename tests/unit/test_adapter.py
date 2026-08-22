@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -11,6 +12,7 @@ from src.adapter import (
     _log2_cost,
     _normalize_attack,
     _run_estimator,
+    execute,
 )
 from src.models import (
     Attack,
@@ -50,6 +52,7 @@ class FakeDistributionFactory:
 
 class FakeLwe:
     deny_list: tuple[str, ...] | None = None
+    raw_results: ClassVar[dict[str, object]] = {}
 
     class Parameters:
         def __init__(self, **values: object) -> None:
@@ -58,7 +61,7 @@ class FakeLwe:
     @classmethod
     def estimate(cls, _parameters: object, **options: object) -> dict[str, object]:
         cls.deny_list = options["deny_list"]  # type: ignore[assignment]
-        return {}
+        return cls.raw_results
 
 
 class FakeReal:
@@ -85,6 +88,7 @@ class FakeRealField:
 
 @pytest.fixture(autouse=True)
 def fake_estimator(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeLwe.raw_results = {}
     monkeypatch.setitem(
         sys.modules,
         "estimator",
@@ -186,6 +190,49 @@ def test_fast_lwe_plan_denies_slow_upstream_attacks() -> None:
     request = request_model()
     _run_estimator(request, request.target_attacks)
     assert FakeLwe.deny_list == ("arora-gb", "bkw")
+
+
+def test_multi_attack_execution_reports_shared_request_timing() -> None:
+    request = request_model()
+    FakeLwe.raw_results = {
+        {Attack.ARORA_GB: "arora-gb"}.get(attack, attack.value): {"rop": 2**40}
+        for attack in request.target_attacks
+    }
+    response = execute(request)
+
+    assert response.duration_ms >= 0
+    assert all(result.outcome.kind == "computed" for result in response.results)
+    assert all(result.duration_ms == response.duration_ms for result in response.results)
+    assert all(result.duration_scope == "request_group" for result in response.results)
+    assert all(
+        result.shared_attacks == request_model().target_attacks for result in response.results
+    )
+
+
+def test_single_attack_no_finite_result_has_independent_timing() -> None:
+    request = request_model().model_copy(update={"target_attacks": [Attack.BKW]})
+    FakeLwe.raw_results = {"bkw": {"rop": float("inf")}}
+
+    response = execute(request)
+
+    assert response.results[0].outcome.kind == "no_finite_estimate"
+    assert response.results[0].duration_ms == response.duration_ms
+    assert response.results[0].duration_scope == "attack"
+    assert response.results[0].shared_attacks == []
+
+
+def test_estimator_failure_has_independent_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(_class: type[FakeLwe], _parameters: object, **_options: object) -> dict[str, object]:
+        raise RuntimeError("mock estimator failure")
+
+    monkeypatch.setattr(FakeLwe, "estimate", classmethod(fail))
+    request = request_model().model_copy(update={"target_attacks": [Attack.BKW]})
+
+    response = execute(request)
+
+    assert response.results[0].outcome.kind == "failed"
+    assert response.results[0].duration_ms == response.duration_ms
+    assert response.results[0].duration_scope == "attack"
 
 
 def test_adaptive_slow_plan_remains_callable() -> None:

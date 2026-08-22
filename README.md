@@ -10,17 +10,22 @@ and descendant-process cleanup remain enforceable.
 - `GET /healthz`
 - `GET /v1/metadata`
 - `POST /v1/estimate`
-- `POST /v1/preflight` — cheap Arora-GB/BKW estimates used by the Web scheduler
+- `POST /v1/preflight` — target-aware Arora-GB screening and numeric BKW
+  estimates used by the Web scheduler
 
 The preflight values are attack-selection estimates, not security reports.
 They must be calibrated against `/v1/estimate` before changing the production
 stop margin. Calibration plans and tooling live under `calibration/` and
 `tools/`; the expensive matrix is intentionally not part of routine CI.
 
-Rule v5 reviews discrete-Gaussian errors plus centered-binomial eta 1 through 8
-and symmetric uniform integer `[-r,r]` for `r=1..8`. The Web scheduler applies
-one 10-bit margin per attack. Arora-GB and BKW admit finite or unlimited samples
-in the reviewed bounded domain. Unknown preflight outcomes always run exact.
+Arora-GB rule v6 receives the required security and separate requested coarse
+and refined margins, then returns
+only `above_threshold` or `needs_exact`. Its calibrated margin floors are 64 bit
+for the coarse tier and 10 bit for the refined tier, and its per-attack budget
+is four seconds. BKW remains the numeric rule-v5 model with a 10-bit floor.
+Reviewed errors are discrete Gaussian sigma 0.7 through 4.0, centered binomial
+eta 1 through 8, and symmetric uniform integer `[-r,r]` for `r=1..8`. Unknown,
+out-of-domain, timed-out, or mismatched results always run exact.
 
 The upstream estimator is installed as a Python package from the pinned
 `main` commit recorded in `pyproject.toml` and `uv.lock`. Runtime provenance is

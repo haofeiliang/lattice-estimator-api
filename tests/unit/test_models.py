@@ -10,7 +10,7 @@ from src.models import Attack, EstimateRequest, PreflightRequest, attacks_for_pr
 
 def request_data() -> dict[str, object]:
     return {
-        "schema_version": 2,
+        "schema_version": 4,
         "problem": {
             "kind": "lwe",
             "dimension": 512,
@@ -64,6 +64,9 @@ def test_lwe_exposes_fast_and_adaptive_slow_attacks() -> None:
 def test_preflight_only_accepts_slow_lwe_attacks() -> None:
     source = request_data()
     source["operation"] = "preflight"
+    source["required_security_bits"] = "128"
+    source["requested_arora_gb_coarse_margin_bits"] = "64"
+    source["requested_arora_gb_refined_margin_bits"] = "10"
     source["target_attacks"] = ["arora_gb", "bkw"]
     request = PreflightRequest.model_validate(source)
     assert request.operation == "preflight"

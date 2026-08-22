@@ -1,0 +1,68 @@
+{
+  "format": "lattice-estimator/slow-attack-calibration-baseline",
+  "version": 6,
+  "generated_at": "2026-08-22T17:30:00+08:00",
+  "method": {
+    "kind": "target_aware_arora_gb_screen",
+    "fitted_coefficients": false,
+    "description": "Rule v6 keeps the attack-derived Arora-GB equations and limits Hilbert-series work to degrees that can affect the requested threshold. Calibration selects conservative tier margins only; it does not alter attack formulas. BKW remains rule v5."
+  },
+  "rule_versions": {
+    "arora_gb": 6,
+    "bkw": 5
+  },
+  "margins": {
+    "arora_gb_coarse": {
+      "largest_failing_candidate_bits": 55,
+      "smallest_zero_unsafe_skip_candidate_bits": 56,
+      "safety_cushion_bits": 8,
+      "production_floor_bits": 64
+    },
+    "arora_gb_refined": {
+      "smallest_tested_zero_unsafe_skip_candidate_bits": 0,
+      "safety_cushion_bits": 8,
+      "minimum_floor_bits": 10,
+      "production_floor_bits": 10
+    },
+    "bkw": {
+      "production_floor_bits": 10,
+      "source": "calibration/baselines/slow-attacks-v5.json"
+    }
+  },
+  "development_validation": {
+    "finite_exact_rows": 120,
+    "target_decisions": 2280,
+    "above_threshold": 900,
+    "needs_exact": 1380,
+    "unsafe_skips": 0,
+    "coarse_duration_ms": {"median": 1, "p95": 2, "maximum": 2},
+    "refined_duration_ms": {"median": 0, "p95": 40, "maximum": 96}
+  },
+  "holdout_validation": {
+    "finite_exact_rows": 87,
+    "target_decisions": 1653,
+    "above_threshold": 678,
+    "needs_exact": 975,
+    "unsafe_skips": 0,
+    "coarse_duration_ms": {"median": 1, "p95": 2, "maximum": 4},
+    "refined_duration_ms": {"median": 0, "p95": 5, "maximum": 156}
+  },
+  "non_finite_exact_rows": {
+    "development_excluded_from_numeric_margin_check": 264,
+    "holdout_excluded_from_numeric_margin_check": 35,
+    "policy": "Retained as fallback and performance cases; outcomes without finite exact security bits cannot establish an unsafe numeric skip."
+  },
+  "first_bsk": {
+    "decision": "above_threshold",
+    "tier": "coarse",
+    "required_security_bits": 128,
+    "effective_margin_bits": 64,
+    "decision_threshold_bits": 192,
+    "maximum_degree_checked": 12,
+    "algorithm_duration_ms": 2,
+    "single_request_wall_seconds": 1.506,
+    "previous_v5_preflight_seconds": 37.225,
+    "previous_exact_seconds": 36.217
+  },
+  "decision": "enable_v6_in_all_currently_reviewed_arora_domains"
+}

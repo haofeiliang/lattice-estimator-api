@@ -1,0 +1,47 @@
+{
+  "format": "lattice-estimator/arora-gb-v6-threshold-validation-plan",
+  "version": 1,
+  "targets": [96, 112, 120, 128, 136, 144, 160, 176, 184, 192, 200, 208, 224, 240, 248, 256, 264, 272, 288],
+  "development_inputs": [
+    "calibration/arora-bkw-v2-reviewed-replay.jsonl"
+  ],
+  "holdout_inputs": [
+    "calibration/arora-n1024-holdout-observations.jsonl",
+    "calibration/arora-bounded-finite-v5-final-replay.jsonl",
+    "calibration/arora-gaussian-diversity-v5-final-replay.jsonl",
+    "calibration/arora-gaussian-finite-v5-final-replay.jsonl"
+  ],
+  "coarse_margin_candidates": [32, 40, 48, 52, 54, 55, 56],
+  "refined_margin_candidates": [0, 2],
+  "safety_cushion_bits": 8,
+  "minimum_production_margins": {
+    "coarse": 32,
+    "refined": 10
+  },
+  "performance_regressions": [
+    {
+      "name": "First BSK",
+      "dimension": 1024,
+      "modulus": "67104769",
+      "samples": {"kind": "unlimited"},
+      "secret": {"kind": "sparse_ternary"},
+      "error": {"kind": "discrete_gaussian", "standard_deviation": "3.19"}
+    },
+    {
+      "name": "n2048-q4096",
+      "dimension": 2048,
+      "modulus": "4096",
+      "samples": {"kind": "unlimited"},
+      "secret": {"kind": "uniform_binary"},
+      "error": {"kind": "discrete_gaussian", "standard_deviation": "3.2"}
+    },
+    {
+      "name": "n4096-q32",
+      "dimension": 4096,
+      "modulus": "4294967296",
+      "samples": {"kind": "unlimited"},
+      "secret": {"kind": "uniform_binary"},
+      "error": {"kind": "discrete_gaussian", "standard_deviation": "3.2"}
+    }
+  ]
+}

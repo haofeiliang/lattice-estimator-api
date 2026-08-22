@@ -7,6 +7,7 @@ import hashlib
 import itertools
 import json
 import math
+import time
 import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
@@ -17,6 +18,39 @@ from typing import Any
 
 PLAN_FORMAT = "lattice-estimator/slow-attack-calibration-plan"
 OBSERVATION_FORMAT = "lattice-estimator/slow-attack-calibration-observation"
+V6_TARGETS = (
+    96,
+    112,
+    120,
+    128,
+    136,
+    144,
+    160,
+    176,
+    184,
+    192,
+    200,
+    208,
+    224,
+    240,
+    248,
+    256,
+    264,
+    272,
+    288,
+)
+
+
+def _preflight_payload(
+    payload: dict[str, Any], required_security_bits: int = 128, requested_margin_bits: int = 0
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "operation": "preflight",
+        "required_security_bits": str(required_security_bits),
+        "requested_arora_gb_coarse_margin_bits": str(requested_margin_bits),
+        "requested_arora_gb_refined_margin_bits": str(requested_margin_bits),
+    }
 
 
 def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
@@ -43,7 +77,7 @@ def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
             errors,
         ):
             yield {
-                "schema_version": 2,
+                "schema_version": 4,
                 "problem": {
                     "kind": "lwe",
                     "dimension": n,
@@ -89,7 +123,7 @@ def _result(response: dict[str, Any]) -> dict[str, Any]:
 
 def _collect_one(payload: dict[str, Any], base_url: str) -> dict[str, Any]:
     identity = _identity(payload)
-    preflight_payload = {**payload, "operation": "preflight"}
+    preflight_payload = _preflight_payload(payload)
     try:
         preflight = _post(
             f"{base_url.rstrip('/')}/v1/preflight",
@@ -147,7 +181,7 @@ def collect(plan_path: Path, output: Path, base_url: str, workers: int) -> None:
 
 def _replay_one(row: dict[str, Any], base_url: str) -> dict[str, Any]:
     payload = row["request"]
-    preflight_payload = {**payload, "operation": "preflight"}
+    preflight_payload = _preflight_payload(payload)
     try:
         preflight = _post(
             f"{base_url.rstrip('/')}/v1/preflight",
@@ -317,6 +351,88 @@ def summarize(inputs: list[Path], output: Path, cushion: float) -> None:
     )
 
 
+def validate_arora_v6_local(
+    inputs: list[Path],
+    output: Path,
+    targets: list[int],
+    coarse_margin_floor_bits: int,
+    refined_margin_floor_bits: int,
+) -> None:
+    """Replay the target screen in one Sage process against pinned exact outcomes."""
+    from src.adapter import _lwe_parameters
+    from src.models import LweProblem
+    from src.slow_estimate import arora_gb_threshold_screen
+
+    counts: Counter[str] = Counter()
+    tier_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    durations: dict[str, list[int]] = defaultdict(list)
+    unsafe: list[dict[str, Any]] = []
+    source_rows = [
+        row for row in _latest_rows(inputs) if row["request"]["target_attacks"] == ["arora_gb"]
+    ]
+    rows = [row for row in source_rows if _computed_bits(row["exact"]) is not None]
+    for row in rows:
+        exact_bits = _computed_bits(row["exact"])
+        problem = LweProblem.model_validate(row["request"]["problem"])
+        params = _lwe_parameters(problem)
+        for target in targets:
+            started = time.monotonic()
+            screen = arora_gb_threshold_screen(
+                params,
+                target,
+                0,
+                0,
+                coarse_margin_floor_bits=coarse_margin_floor_bits,
+                refined_margin_floor_bits=refined_margin_floor_bits,
+            )
+            duration_ms = max(0, round((time.monotonic() - started) * 1_000))
+            counts[screen.decision] += 1
+            tier_counts[screen.precision_tier][screen.decision] += 1
+            durations[screen.precision_tier].append(duration_ms)
+            if (
+                screen.decision == "above_threshold"
+                and exact_bits is not None
+                and exact_bits < target
+            ):
+                unsafe.append(
+                    {
+                        "target_bits": target,
+                        "exact_security_bits": exact_bits,
+                        "tier": screen.precision_tier,
+                        "effective_margin_bits": screen.effective_margin_bits,
+                        "problem": row["request"]["problem"],
+                    }
+                )
+    output.write_text(
+        json.dumps(
+            {
+                "format": "lattice-estimator/arora-gb-v6-validation",
+                "version": 1,
+                "targets": targets,
+                "coarse_margin_floor_bits": coarse_margin_floor_bits,
+                "refined_margin_floor_bits": refined_margin_floor_bits,
+                "source_arora_rows": len(source_rows),
+                "source_rows": len(rows),
+                "excluded_without_finite_exact_bits": len(source_rows) - len(rows),
+                "decisions": dict(sorted(counts.items())),
+                "tiers": {
+                    tier: {
+                        "decisions": dict(sorted(decisions.items())),
+                        "duration_ms": _duration_summary(durations[tier]),
+                    }
+                    for tier, decisions in sorted(tier_counts.items())
+                },
+                "unsafe_skip_count": len(unsafe),
+                "unsafe_skips": unsafe,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -338,6 +454,12 @@ def main() -> None:
     summary_parser.add_argument("--input", type=Path, action="append", required=True)
     summary_parser.add_argument("--output", type=Path, required=True)
     summary_parser.add_argument("--safety-cushion-bits", type=float, default=8.0)
+    v6_parser = commands.add_parser("validate-arora-v6-local")
+    v6_parser.add_argument("--input", type=Path, action="append", required=True)
+    v6_parser.add_argument("--output", type=Path, required=True)
+    v6_parser.add_argument("--targets", type=int, nargs="*", default=list(V6_TARGETS))
+    v6_parser.add_argument("--coarse-margin-floor-bits", type=int, default=64)
+    v6_parser.add_argument("--refined-margin-floor-bits", type=int, default=10)
     arguments = parser.parse_args()
     if arguments.command in {"collect", "replay-preflight"}:
         if arguments.workers < 1:
@@ -353,8 +475,16 @@ def main() -> None:
         )
     elif arguments.command == "select-plan":
         select_plan(arguments.plan, arguments.input, arguments.output)
-    else:
+    elif arguments.command == "summarize":
         summarize(arguments.input, arguments.output, arguments.safety_cushion_bits)
+    else:
+        validate_arora_v6_local(
+            arguments.input,
+            arguments.output,
+            arguments.targets,
+            arguments.coarse_margin_floor_bits,
+            arguments.refined_margin_floor_bits,
+        )
 
 
 if __name__ == "__main__":

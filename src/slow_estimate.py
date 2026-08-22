@@ -8,10 +8,16 @@ required before their output is used with a stop margin.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-SLOW_ESTIMATE_RULE_VERSION = 5
+ARORA_GB_PREFLIGHT_RULE_VERSION = 6
+BKW_PREFLIGHT_RULE_VERSION = 5
+ARORA_COARSE_MARGIN_FLOOR_BITS = 64.0
+ARORA_REFINED_MARGIN_FLOOR_BITS = 10.0
+ARORA_COARSE_BUDGET_SECONDS = 1.0
+ARORA_TOTAL_BUDGET_SECONDS = 4.0
 ARORA_MAX_SOLVING_DEGREE = 256
 ARORA_GAUSSIAN_MAX_TAIL_SEARCH = 64
 ARORA_GAUSSIAN_REAL_PRECISION_BITS = 256
@@ -23,6 +29,39 @@ class SlowEstimate:
 
     log2_cost: float
     diagnostics: dict[str, int | float | str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AroraThresholdScreen:
+    """A scheduling decision produced by the target-aware Arora model."""
+
+    decision: str
+    precision_tier: str
+    calibrated_margin_floor_bits: float
+    effective_margin_bits: float
+    decision_threshold_bits: float
+    reason: str
+    diagnostics: dict[str, int | float | str] = field(default_factory=dict)
+
+
+class AroraScreenDeadline(TimeoutError):
+    """The bounded Arora screen exhausted its per-attack budget."""
+
+
+@dataclass
+class _AroraScreenWork:
+    deadline: float
+    candidates_checked: int = 0
+    candidates_pruned: int = 0
+    max_degree_checked: int = 0
+    tail_samples: dict[tuple[str, int], int] = field(default_factory=dict)
+    hilbert: dict[tuple[int, tuple[tuple[int, int], ...], int], int | None] = field(
+        default_factory=dict
+    )
+
+    def check_deadline(self) -> None:
+        if time.monotonic() >= self.deadline:
+            raise AroraScreenDeadline
 
 
 @dataclass(frozen=True)
@@ -112,14 +151,19 @@ def _semi_regular_dreg(
     equations: tuple[tuple[int, int], ...],
     *,
     max_degree: int = ARORA_MAX_SOLVING_DEGREE,
+    deadline: float | None = None,
 ) -> int | None:
     """Estimate solving degree from the first negative Hilbert coefficient."""
     numerator = {0: 1}
     for equation_degree, count in equations:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise AroraScreenDeadline
         if equation_degree <= 0 or count <= 0:
             continue
         following: dict[int, int] = {}
         for shift, base in numerator.items():
+            if deadline is not None and time.monotonic() >= deadline:
+                raise AroraScreenDeadline
             for index in range(min(count, (max_degree - shift) // equation_degree) + 1):
                 coefficient = math.comb(count, index)
                 if index % 2:
@@ -131,6 +175,8 @@ def _semi_regular_dreg(
         }
 
     for degree in range(max_degree + 1):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise AroraScreenDeadline
         coefficient = sum(
             numerator_coefficient * math.comb(num_vars + degree - shift - 1, degree - shift)
             for shift, numerator_coefficient in numerator.items()
@@ -139,6 +185,253 @@ def _semi_regular_dreg(
         if coefficient < 0:
             return degree
     return None
+
+
+def _threshold_degree_limit(num_vars: int, remaining_bits: float, omega: float) -> int:
+    """Largest degree whose algebraic cost can still fall below the threshold."""
+    if num_vars <= 0 or remaining_bits <= 0:
+        return -1
+    low, high = 0, ARORA_MAX_SOLVING_DEGREE
+    while low < high:
+        middle = (low + high + 1) // 2
+        if omega * _log2_monomials(num_vars, middle) < remaining_bits:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+def _screen_grid(stop: int, points: int) -> tuple[int, ...]:
+    if stop <= 0:
+        return (0,)
+    count = min(stop + 1, points)
+    return tuple(sorted({round(index * stop / (count - 1)) for index in range(count)}))
+
+
+def _screen_tail_grid(sigma: float, refined: bool) -> tuple[int, ...]:
+    start = max(1, math.ceil(sigma))
+    stop = ARORA_GAUSSIAN_MAX_TAIL_SEARCH
+    if start > stop:
+        return ()
+    if refined:
+        return tuple(range(start, stop + 1))
+    values = set(_screen_grid(stop - start, 9))
+    return tuple(start + value for value in values)
+
+
+def _screen_hilbert_candidate(
+    *,
+    num_vars: int,
+    equations: tuple[tuple[int, int], ...],
+    repetition_bits: float,
+    threshold_bits: float,
+    omega: float,
+    work: _AroraScreenWork,
+) -> bool:
+    """Return true when this model candidate can fall below the threshold."""
+    work.check_deadline()
+    if repetition_bits >= threshold_bits:
+        work.candidates_pruned += 1
+        return False
+    degree_limit = _threshold_degree_limit(num_vars, threshold_bits - repetition_bits, omega)
+    if degree_limit < 0:
+        work.candidates_pruned += 1
+        return False
+    work.candidates_checked += 1
+    work.max_degree_checked = max(work.max_degree_checked, degree_limit)
+    key = (num_vars, equations, degree_limit)
+    if key not in work.hilbert:
+        work.hilbert[key] = _semi_regular_dreg(
+            num_vars, equations, max_degree=degree_limit, deadline=work.deadline
+        )
+    degree = work.hilbert[key]
+    return degree is not None and (
+        repetition_bits + omega * _log2_monomials(num_vars, degree) < threshold_bits
+    )
+
+
+def _screen_repetition(params: Any, zeta: int) -> float | None:
+    n = int(params.n)
+    if bool(getattr(params.Xs, "is_sparse", False)):
+        h = int(getattr(params.Xs, "hamming_weight", 0))
+        width = _bounds_width(params.Xs)
+        if h > 0 and (width is None or width <= 1):
+            return None
+        return _sparse_repetition_log2(n, h, zeta, 1 if h == 0 else width - 1)
+    base = _dense_guess_base(params)
+    if base is None or base <= 1:
+        return 0.0 if zeta == 0 else None
+    return zeta * math.log2(base)
+
+
+def _screen_zeta_grid(params: Any, threshold_bits: float, refined: bool) -> tuple[int, ...]:
+    n = int(params.n)
+    if bool(getattr(params.Xs, "is_sparse", False)):
+        stop = max(0, n - 40)
+    else:
+        base = _dense_guess_base(params)
+        if base is None or base <= 1:
+            return (0,)
+        stop = min(n - 1, math.floor(threshold_bits / math.log2(base)))
+    return _screen_grid(stop, 65 if refined else 9)
+
+
+def _arora_tier_has_candidate_below(
+    params: Any,
+    *,
+    threshold_bits: float,
+    refined: bool,
+    omega: float,
+    work: _AroraScreenWork,
+) -> bool:
+    """Search the attack-derived candidate family only as far as the target requires."""
+    normalized = params.normalize()
+    n = int(normalized.n)
+    if n <= 0:
+        return True
+    zetas = _screen_zeta_grid(normalized, threshold_bits, refined)
+    bounded_width = _bounds_width(normalized.Xe)
+    gaussian = bool(getattr(normalized.Xe, "is_Gaussian_like", False))
+    sigma_value = getattr(normalized.Xe, "stddev", None)
+    sigma = _finite_float(sigma_value)
+    if bounded_width is None and (not gaussian or sigma is None or not 0.7 <= sigma <= 4.0):
+        return True
+    if bounded_width is not None and bounded_width > 17:
+        return True
+
+    for zeta in zetas:
+        work.check_deadline()
+        reduced_dimension = n - zeta
+        if reduced_dimension <= 0:
+            continue
+        repetition = _screen_repetition(normalized, zeta)
+        if repetition is None:
+            return True
+        if bounded_width is not None:
+            maximum_samples = reduced_dimension**bounded_width
+            samples = (
+                maximum_samples
+                if _is_infinite(normalized.m)
+                else min(int(normalized.m), maximum_samples)
+            )
+            equations = (
+                (bounded_width, samples),
+                *_secret_equations(normalized, reduced_dimension),
+            )
+            if _screen_hilbert_candidate(
+                num_vars=reduced_dimension,
+                equations=equations,
+                repetition_bits=repetition,
+                threshold_bits=threshold_bits,
+                omega=omega,
+                work=work,
+            ):
+                return True
+            continue
+
+        assert sigma is not None
+        for tail in _screen_tail_grid(sigma, refined):
+            work.check_deadline()
+            tail_key = (str(sigma_value), tail)
+            if tail_key not in work.tail_samples:
+                work.tail_samples[tail_key] = _gaussian_tail_sample_count(sigma_value, tail)
+            samples = work.tail_samples[tail_key]
+            if samples <= 0:
+                continue
+            if not _is_infinite(normalized.m) and samples > int(normalized.m):
+                continue
+            equations = (
+                (2 * tail + 1, samples),
+                *_secret_equations(normalized, reduced_dimension),
+            )
+            if _screen_hilbert_candidate(
+                num_vars=reduced_dimension,
+                equations=equations,
+                repetition_bits=repetition,
+                threshold_bits=threshold_bits,
+                omega=omega,
+                work=work,
+            ):
+                return True
+    return False
+
+
+def arora_gb_threshold_screen(
+    params: Any,
+    required_security_bits: float,
+    requested_coarse_margin_bits: float,
+    requested_refined_margin_bits: float,
+    *,
+    omega: float = 2.0,
+    started: float | None = None,
+    coarse_margin_floor_bits: float = ARORA_COARSE_MARGIN_FLOOR_BITS,
+    refined_margin_floor_bits: float = ARORA_REFINED_MARGIN_FLOOR_BITS,
+) -> AroraThresholdScreen:
+    """Decide whether the reviewed model clears a target without estimating its optimum."""
+    started = time.monotonic() if started is None else started
+    total_deadline = started + ARORA_TOTAL_BUDGET_SECONDS
+    work = _AroraScreenWork(deadline=min(started + ARORA_COARSE_BUDGET_SECONDS, total_deadline))
+    tiers = (
+        ("coarse", coarse_margin_floor_bits, requested_coarse_margin_bits, False),
+        ("refined", refined_margin_floor_bits, requested_refined_margin_bits, True),
+    )
+    for tier, floor, requested_margin, refined in tiers:
+        effective_margin = max(requested_margin, floor)
+        threshold = required_security_bits + effective_margin
+        if refined:
+            work.deadline = total_deadline
+        try:
+            has_candidate_below = _arora_tier_has_candidate_below(
+                params,
+                threshold_bits=threshold,
+                refined=refined,
+                omega=omega,
+                work=work,
+            )
+        except AroraScreenDeadline:
+            if not refined:
+                continue
+            return AroraThresholdScreen(
+                "needs_exact",
+                tier,
+                floor,
+                effective_margin,
+                threshold,
+                "time_budget_exhausted",
+                _screen_diagnostics(work),
+            )
+        if not has_candidate_below:
+            return AroraThresholdScreen(
+                "above_threshold",
+                tier,
+                floor,
+                effective_margin,
+                threshold,
+                "reviewed_search_above_threshold",
+                _screen_diagnostics(work),
+            )
+        if refined:
+            return AroraThresholdScreen(
+                "needs_exact",
+                tier,
+                floor,
+                effective_margin,
+                threshold,
+                "candidate_may_be_below_threshold",
+                _screen_diagnostics(work),
+            )
+    raise AssertionError("the refined Arora tier must return a decision")
+
+
+def _screen_diagnostics(work: _AroraScreenWork) -> dict[str, int | float | str]:
+    return {
+        "model": "arora_gb_target_screen",
+        "candidates_checked": work.candidates_checked,
+        "candidates_pruned": work.candidates_pruned,
+        "max_degree_checked": work.max_degree_checked,
+        "hilbert_cache_entries": len(work.hilbert),
+        "tail_cache_entries": len(work.tail_samples),
+    }
 
 
 def _secret_equations(params: Any, dimension: int | None = None) -> tuple[tuple[int, int], ...]:

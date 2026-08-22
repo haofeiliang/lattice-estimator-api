@@ -7,8 +7,8 @@ import re
 from functools import cache
 from importlib.metadata import PackageNotFoundError, distribution
 
-ADAPTER_VERSION = "3"
-ADAPTER_SCHEMA_VERSION = 2
+ADAPTER_VERSION = "5"
+ADAPTER_SCHEMA_VERSION = 4
 SAGE_VERSION = "10.9"
 SAGE_IMAGE = (
     "sagemath/sagemath@sha256:2401ffa8e9fc85c7ea17d3649bde5958b4dbf0858b3e504098c4102720151711"

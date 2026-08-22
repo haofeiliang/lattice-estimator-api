@@ -155,7 +155,7 @@ def test_summary_uses_latest_observation_for_retried_identity(tmp_path: Path) ->
 
 def test_select_plan_materializes_latest_retry_only(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 2,
+        "schema_version": 4,
         "problem": {
             "kind": "lwe",
             "dimension": 64,
@@ -219,7 +219,7 @@ def test_collector_preserves_preflight_and_exact_durations(monkeypatch: Any) -> 
     monkeypatch.setattr(tool, "_post", lambda _url, _payload, **_kwargs: next(responses))
     row = tool._collect_one(
         {
-            "schema_version": 2,
+            "schema_version": 4,
             "problem": {},
             "models": {},
             "target_attacks": ["arora_gb"],
