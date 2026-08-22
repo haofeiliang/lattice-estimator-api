@@ -2,7 +2,7 @@
   "format": "lattice-estimator/slow-attack-calibration-plan",
   "version": 2,
   "timeout_seconds": 600,
-  "models": [{ "cost_model": "BDGL16", "shape_model": "GSA" }],
+  "models": [{ "cost_model": "BDGL16" }],
   "experiments": [
     {
       "attack": "arora_gb",

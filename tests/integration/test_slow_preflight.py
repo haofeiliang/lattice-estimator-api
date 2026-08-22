@@ -15,7 +15,7 @@ def test_large_dimension_gaussian_preflight_covers_calibration_range(sigma: str)
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": 1024,
@@ -27,7 +27,7 @@ def test_large_dimension_gaussian_preflight_covers_calibration_range(sigma: str)
                     "standard_deviation": sigma,
                 },
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb", "bkw"],
             "timeout_seconds": 300,
         }
@@ -64,7 +64,7 @@ def test_bkw_finite_sample_amplification_matches_exact_structure() -> None:
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": 128,
@@ -73,7 +73,7 @@ def test_bkw_finite_sample_amplification_matches_exact_structure() -> None:
                 "secret": {"kind": "uniform_ternary"},
                 "error": {"kind": "discrete_gaussian", "standard_deviation": "1.5"},
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["bkw"],
             "timeout_seconds": 300,
         }
@@ -101,7 +101,7 @@ def test_reviewed_unlimited_bounded_preflight_tracks_exact(
     attack: str, error: dict[str, object]
 ) -> None:
     payload = {
-        "schema_version": 4,
+        "schema_version": 5,
         "problem": {
             "kind": "lwe",
             "dimension": 64,
@@ -110,7 +110,7 @@ def test_reviewed_unlimited_bounded_preflight_tracks_exact(
             "secret": {"kind": "uniform_binary"},
             "error": error,
         },
-        "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+        "cost_model": "BDGL16",
         "target_attacks": [attack],
         "timeout_seconds": 300,
     }
@@ -182,7 +182,7 @@ def test_bounded_arora_guess_composition_matches_finite_sample_holdouts(
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": 128,
@@ -191,7 +191,7 @@ def test_bounded_arora_guess_composition_matches_finite_sample_holdouts(
                 "secret": secret,
                 "error": error,
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb"],
             "timeout_seconds": 300,
         }
@@ -219,7 +219,7 @@ def test_preflight_unsafe_error_baselines(
     maximum_delta: float,
 ) -> None:
     payload = {
-        "schema_version": 4,
+        "schema_version": 5,
         "problem": {
             "kind": "lwe",
             "dimension": dimension,
@@ -228,7 +228,7 @@ def test_preflight_unsafe_error_baselines(
             "secret": {"kind": "uniform_binary"},
             "error": {"kind": "discrete_gaussian", "standard_deviation": sigma},
         },
-        "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+        "cost_model": "BDGL16",
         "target_attacks": [attack],
         "timeout_seconds": 300,
     }
@@ -282,7 +282,7 @@ def test_arora_v2_matches_long_running_holdouts(
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": dimension,
@@ -294,7 +294,7 @@ def test_arora_v2_matches_long_running_holdouts(
                     "standard_deviation": sigma,
                 },
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb"],
             "timeout_seconds": 300,
         }
@@ -312,7 +312,7 @@ def test_arora_v2_sparse_search_keeps_no_guessing_baseline() -> None:
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": 512,
@@ -324,7 +324,7 @@ def test_arora_v2_sparse_search_keeps_no_guessing_baseline() -> None:
                     "standard_deviation": "0.7",
                 },
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb"],
             "timeout_seconds": 300,
         }
@@ -343,7 +343,7 @@ def test_first_bsk_v6_stops_well_before_the_exact_solving_degree() -> None:
             "required_security_bits": "128",
             "requested_arora_gb_coarse_margin_bits": "64",
             "requested_arora_gb_refined_margin_bits": "10",
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {
                 "kind": "lwe",
                 "dimension": 1024,
@@ -355,7 +355,7 @@ def test_first_bsk_v6_stops_well_before_the_exact_solving_degree() -> None:
                     "standard_deviation": "3.19",
                 },
             },
-            "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb"],
             "timeout_seconds": 300,
         }

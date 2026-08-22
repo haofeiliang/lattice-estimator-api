@@ -7,8 +7,8 @@ import re
 from functools import cache
 from importlib.metadata import PackageNotFoundError, distribution
 
-ADAPTER_VERSION = "5"
-ADAPTER_SCHEMA_VERSION = 4
+ADAPTER_VERSION = "6"
+ADAPTER_SCHEMA_VERSION = 5
 
 # Runtime identity is reported in metadata and attached to every estimate so a
 # result can be traced back to the exact Sage environment that produced it.

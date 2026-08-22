@@ -10,7 +10,7 @@ from src.models import Attack, EstimateRequest, PreflightRequest, attacks_for_pr
 
 def request_data() -> dict[str, object]:
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "problem": {
             "kind": "lwe",
             "dimension": 512,
@@ -23,10 +23,7 @@ def request_data() -> dict[str, object]:
             },
             "error": {"kind": "discrete_gaussian", "standard_deviation": "16"},
         },
-        "models": {
-            "cost_model": "BDGL16",
-            "shape_model": "GSA",
-        },
+        "cost_model": "BDGL16",
         "target_attacks": [
             "usvp",
             "bdd",

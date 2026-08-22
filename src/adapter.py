@@ -315,8 +315,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
     # lattice-estimator loaded and remains independently killable/responsive.
     from estimator import LWE, NTRU, RC, SIS, Simulator  # type: ignore[import-not-found]
 
-    cost_model = getattr(RC, request.models.cost_model.value)
-    shape_model = getattr(Simulator, request.models.shape_model.value)
+    cost_model = getattr(RC, request.cost_model.value)
     requested = {PUBLIC_TO_UPSTREAM[attack] for attack in attacks}
 
     if isinstance(request.problem, LweProblem):
@@ -327,7 +326,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
         return LWE.estimate(
             params,
             red_cost_model=cost_model,
-            red_shape_model=shape_model,
+            red_shape_model=Simulator.GSA,
             deny_list=tuple(sorted(all_attacks - requested)),
             jobs=1,
             catch_exceptions=True,
@@ -348,7 +347,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
         return NTRU.estimate(
             params,
             red_cost_model=cost_model,
-            red_shape_model=shape_model,
+            red_shape_model=Simulator.GSA,
             deny_list=tuple(sorted(all_attacks - requested)),
             jobs=1,
             catch_exceptions=True,
@@ -368,7 +367,7 @@ def _run_estimator(request: EstimateRequest, attacks: list[Attack]) -> dict[str,
         return SIS.estimate(
             params,
             red_cost_model=cost_model,
-            red_shape_model=shape_model,
+            red_shape_model=Simulator.GSA,
             deny_list=(),
             jobs=1,
             catch_exceptions=True,

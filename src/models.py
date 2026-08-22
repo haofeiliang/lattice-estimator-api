@@ -235,12 +235,6 @@ class CostModel(str, Enum):
     LAA_MOS_POL14 = "LaaMosPol14"
 
 
-class ShapeModel(str, Enum):
-    """Supported Gram-Schmidt shape simulators exposed by the API."""
-
-    GSA = "GSA"
-
-
 class Attack(str, Enum):
     """Stable public attack identifiers independent of upstream display names."""
 
@@ -292,15 +286,7 @@ EXACT_DISTRIBUTIONS = (
 
 
 WireCostModel: TypeAlias = Annotated[CostModel, Field(strict=False)]
-WireShapeModel: TypeAlias = Annotated[ShapeModel, Field(strict=False)]
 WireAttack: TypeAlias = Annotated[Attack, Field(strict=False)]
-
-
-class EstimatorModels(StrictModel):
-    """Cost and basis-shape assumptions shared by all requested attacks."""
-
-    cost_model: WireCostModel
-    shape_model: WireShapeModel
 
 
 class EstimateRequest(StrictModel):
@@ -308,7 +294,7 @@ class EstimateRequest(StrictModel):
 
     schema_version: Literal[ADAPTER_SCHEMA_VERSION] = ADAPTER_SCHEMA_VERSION
     problem: EstimatorProblem
-    models: EstimatorModels
+    cost_model: WireCostModel
     target_attacks: Annotated[list[WireAttack], Field(min_length=1)]
     timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=MAX_TIMEOUT_SECONDS)] = (
         DEFAULT_TIMEOUT_SECONDS
@@ -412,15 +398,6 @@ class ComputedOutcome(StrictModel):
     metrics: dict[str, NormalizedMetric] = Field(default_factory=dict)
 
 
-class UnsupportedOutcome(StrictModel):
-    """The requested attack is not implemented for the supplied parameter domain."""
-
-    kind: Literal["unsupported"]
-    code: str
-    reason: str
-    raw_result: JsonValue | None = None
-
-
 class NoFiniteEstimateOutcome(StrictModel):
     """The exact estimator completed but found no finite positive attack cost."""
 
@@ -471,7 +448,6 @@ WorkerOutcome: TypeAlias = Annotated[
     | NoFiniteEstimateOutcome
     | PreflightUnknownOutcome
     | ThresholdScreenOutcome
-    | UnsupportedOutcome
     | FailedOutcome,
     Field(discriminator="kind"),
 ]

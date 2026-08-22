@@ -155,7 +155,7 @@ def test_summary_uses_latest_observation_for_retried_identity(tmp_path: Path) ->
 
 def test_select_plan_materializes_latest_retry_only(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 4,
+        "schema_version": 5,
         "problem": {
             "kind": "lwe",
             "dimension": 64,
@@ -164,7 +164,7 @@ def test_select_plan_materializes_latest_retry_only(tmp_path: Path) -> None:
             "secret": {"kind": "uniform_binary"},
             "error": {"kind": "centered_binomial", "eta": 1},
         },
-        "models": {"cost_model": "BDGL16", "shape_model": "GSA"},
+        "cost_model": "BDGL16",
         "target_attacks": ["bkw"],
         "timeout_seconds": 30,
     }
@@ -172,7 +172,7 @@ def test_select_plan_materializes_latest_retry_only(tmp_path: Path) -> None:
         "format": tool.PLAN_FORMAT,
         "version": 2,
         "timeout_seconds": 30,
-        "models": [payload["models"]],
+        "models": [{"cost_model": payload["cost_model"]}],
         "experiments": [
             {
                 "attack": "bkw",
@@ -219,9 +219,9 @@ def test_collector_preserves_preflight_and_exact_durations(monkeypatch: Any) -> 
     monkeypatch.setattr(tool, "_post", lambda _url, _payload, **_kwargs: next(responses))
     row = tool._collect_one(
         {
-            "schema_version": 4,
+            "schema_version": 5,
             "problem": {},
-            "models": {},
+            "cost_model": "BDGL16",
             "target_attacks": ["arora_gb"],
             "timeout_seconds": 30,
         },

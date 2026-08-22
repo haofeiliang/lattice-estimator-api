@@ -77,7 +77,7 @@ def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
             errors,
         ):
             yield {
-                "schema_version": 4,
+                "schema_version": 5,
                 "problem": {
                     "kind": "lwe",
                     "dimension": n,
@@ -86,7 +86,7 @@ def requests_from_plan(plan: dict[str, Any]) -> Iterable[dict[str, Any]]:
                     "secret": secret,
                     "error": error,
                 },
-                "models": model,
+                "cost_model": model["cost_model"],
                 "target_attacks": [experiment["attack"]],
                 "timeout_seconds": plan["timeout_seconds"],
             }
